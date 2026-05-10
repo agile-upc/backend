@@ -8,7 +8,6 @@ import com.agrotech.api.profile.application.usecase.ProfileService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
-import io.swagger.v3.oas.annotations.parameters.RequestBody;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -40,13 +39,13 @@ public class ProfilesController {
         return ResponseEntity.ok(profileMapper.toProfileResource(profileService.getProfileById(id)));
     }
 
-    @Operation(summary = "Create profile", requestBody = @RequestBody(content = @Content(mediaType = "multipart/form-data", schema = @Schema(implementation = CreateProfileResource.class))))
+    @Operation(summary = "Create profile", requestBody = @io.swagger.v3.oas.annotations.parameters.RequestBody(content = @Content(mediaType = "multipart/form-data", schema = @Schema(implementation = CreateProfileResource.class))))
     @PostMapping(consumes = "multipart/form-data")
     public ResponseEntity<ProfileResource> createProfile(@ModelAttribute CreateProfileResource createProfileResource) throws IOException {
         return new ResponseEntity<>(profileMapper.toProfileResource(profileService.createProfile(createProfileResource)), HttpStatus.CREATED);
     }
 
-    @Operation(summary = "Update profile", requestBody = @RequestBody(content = @Content(mediaType = "multipart/form-data", schema = @Schema(implementation = UpdateProfileResource.class))))
+    @Operation(summary = "Update profile", requestBody = @io.swagger.v3.oas.annotations.parameters.RequestBody(content = @Content(mediaType = "multipart/form-data", schema = @Schema(implementation = UpdateProfileResource.class))))
     @PutMapping(value = "/{id}", consumes = "multipart/form-data")
     public ResponseEntity<ProfileResource> updateProfile(
             @PathVariable Long id,

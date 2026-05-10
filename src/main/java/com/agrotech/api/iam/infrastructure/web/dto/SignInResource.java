@@ -1,4 +1,11 @@
 package com.agrotech.api.iam.infrastructure.web.dto;
 
-public record SignInResource(String username, String password) {
+import jakarta.validation.constraints.NotBlank;
+
+public record SignInResource(
+        @NotBlank
+        String username,
+        @NotBlank
+        String password
+) {
 }

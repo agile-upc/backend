@@ -8,7 +8,6 @@ import com.agrotech.api.post.application.usecase.PostService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
-import io.swagger.v3.oas.annotations.parameters.RequestBody;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -41,13 +40,13 @@ public class PostsController {
         return ResponseEntity.ok(postMapper.toPostResource(postService.getPostById(id)));
     }
 
-    @Operation(summary = "Create post", requestBody = @RequestBody(content = @Content(mediaType = "multipart/form-data", schema = @Schema(implementation = CreatePostResource.class))))
+    @Operation(summary = "Create post", requestBody = @io.swagger.v3.oas.annotations.parameters.RequestBody(content = @Content(mediaType = "multipart/form-data", schema = @Schema(implementation = CreatePostResource.class))))
     @PostMapping(consumes = "multipart/form-data")
     public ResponseEntity<PostResource> createPost(@ModelAttribute CreatePostResource createPostResource) throws IOException {
         return new ResponseEntity<>(postMapper.toPostResource(postService.createPost(createPostResource)), HttpStatus.CREATED);
     }
 
-    @Operation(summary = "Update post", requestBody = @RequestBody(content = @Content(mediaType = "multipart/form-data", schema = @Schema(implementation = UpdatePostResource.class))))
+    @Operation(summary = "Update post", requestBody = @io.swagger.v3.oas.annotations.parameters.RequestBody(content = @Content(mediaType = "multipart/form-data", schema = @Schema(implementation = UpdatePostResource.class))))
     @PutMapping(value = "/{id}", consumes = "multipart/form-data")
     public ResponseEntity<PostResource> updatePost(
             @PathVariable Long id,
