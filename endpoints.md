@@ -17,6 +17,12 @@
 - Upload limit is `10MB`
 - For `FormData`, do not set `Content-Type` manually
 
+## Public media behavior
+- `Profile.photo` and `Post.image` are returned as direct Google Cloud Storage URLs
+- Those URLs are intended for direct browser rendering in the client
+- This deployment assumes the upload bucket is configured for public object reads
+- The backend does not generate signed URLs for these media fields
+
 ## Shared structures
 
 ### Authenticated session
@@ -92,6 +98,8 @@ Request body for `POST /api/v1/profiles` (`multipart/form-data`):
 - `experience`: integer, optional
 
 Request body for `PUT /api/v1/profiles/{id}` is the same structure, but `photo` is optional.
+
+`photo` is a public browser-accessible GCS URL.
 
 ### Advisor
 Returned by:
@@ -193,6 +201,8 @@ Request body for `POST /api/v1/posts` (`multipart/form-data`):
 - `image`: file, required
 
 Request body for `PUT /api/v1/posts/{id}` is the same structure, but `image` is optional.
+
+`image` is a public browser-accessible GCS URL.
 
 ### Available date
 Returned by:

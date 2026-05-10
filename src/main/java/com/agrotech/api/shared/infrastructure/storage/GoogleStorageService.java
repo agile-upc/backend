@@ -1,7 +1,5 @@
 package com.agrotech.api.shared.infrastructure.storage;
 
-import com.google.cloud.storage.Acl;
-import com.google.cloud.storage.Blob;
 import com.google.cloud.storage.BlobId;
 import com.google.cloud.storage.BlobInfo;
 import com.google.cloud.storage.Storage;
@@ -20,6 +18,8 @@ public class GoogleStorageService {
     @Value("${gcs.bucket.name}")
     private String bucketName;
 
+    // This service returns direct GCS object URLs. Deployments must make uploaded
+    // objects publicly readable at the bucket level for browsers to render them.
     public String uploadFile(MultipartFile file) throws IOException {
 
         String originalName = file.getOriginalFilename();
@@ -32,7 +32,7 @@ public class GoogleStorageService {
                 .setContentType(file.getContentType())
                 .build();
 
-        Blob blob = storage.create(blobInfo, file.getBytes());
+        storage.create(blobInfo, file.getBytes());
 
         return String.format("https://storage.googleapis.com/%s/%s", bucketName, uniqueFileName);
     }

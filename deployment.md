@@ -24,19 +24,18 @@ GCS_PROJECT_ID=<gcp-project-id>
 GEMINI_API_KEY=<google-ai-api-key>
 ```
 
-You do not need `GCS_CREDENTIALS_PATH` anymore. GCS auth now comes from Application Default Credentials, which Cloud Run provides through the attached service account.
-
 ## Production setup
 1. Create or select a Google Cloud project.
 2. Create a Cloud Storage bucket for uploads.
-3. Create a Cloud SQL for MySQL instance and database.
-4. Create a dedicated service account for the backend.
-5. Grant that service account the minimum bucket permissions needed to create objects.
-6. Build the application jar with `mvn package -DskipTests`.
-7. Build the container from the existing `Dockerfile`.
-8. Deploy the container to Cloud Run with the environment variables above.
-9. Attach the dedicated service account to the Cloud Run service.
-10. Configure the frontend to use the Cloud Run HTTPS URL as its base API URL.
+3. Enable public read access for uploaded objects at the bucket level.
+4. Create a Cloud SQL for MySQL instance and database.
+5. Create a dedicated service account for the backend.
+6. Grant that service account the minimum bucket permissions needed to create objects.
+7. Build the application jar with `mvn package -DskipTests`.
+8. Build the container from the existing `Dockerfile`.
+9. Deploy the container to Cloud Run with the environment variables above.
+10. Attach the dedicated service account to the Cloud Run service.
+11. Configure the frontend to use the Cloud Run HTTPS URL as its base API URL.
 
 ## Service account and GCS access
 The backend creates a `Storage` client from ADC. In Cloud Run, ADC resolves to the runtime service account automatically.
@@ -46,7 +45,19 @@ Minimum recommendation:
 - Grant access only to the upload bucket
 - Prefer object-level write permissions instead of broad project-wide admin roles
 
-Important: the backend returns direct `https://storage.googleapis.com/<bucket>/<object>` URLs. Those URLs are useful to browsers only if the bucket or objects are readable by clients. The current code does not generate signed URLs and does not change object ACLs during upload.
+Important: this backend intentionally returns direct `https://storage.googleapis.com/<bucket>/<object>` URLs for profile photos and post images. Those URLs are expected to be opened directly by browsers, so the upload bucket must be configured for public object reads.
+
+Recommended bucket policy:
+- Enable Uniform bucket-level access on the upload bucket
+- Grant `Storage Object Viewer` to `allUsers` on that bucket
+- Keep backend write access on the Cloud Run service account
+
+With that setup:
+- the backend uploads files normally
+- the returned `photo` and `image` URLs are stable public URLs
+- no signed URL generation is needed for this app's current media use case
+
+If you keep the bucket private instead, profile photos and post images returned by the API will not render in browsers without adding signed URL support or proxying media through the backend.
 
 ## Cloud SQL notes
 The app expects standard MySQL connection settings:
@@ -110,4 +121,5 @@ If you use `gcloud run deploy`, make sure you set:
 - Multipart upload size is capped at `10MB`
 - JWT signing depends entirely on `JWT_SECRET`; use a strong secret in production
 - The backend is stateless, so horizontal scaling through Cloud Run is fine
+- Profile photos and post images are designed to be public browser-accessible assets
 - If you need private media instead of public bucket access, add signed URL support in a future change
