@@ -46,7 +46,7 @@ public class ReviewService {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Review not found"));
     }
 
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public Review createReview(CreateReviewResource resource) {
         Farmer farmer = profileService.requireCurrentFarmerEntity();
         Advisor advisor = profileService.getAdvisorEntity(resource.advisorId());
@@ -67,7 +67,7 @@ public class ReviewService {
         return review;
     }
 
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public Review updateReview(Long id, UpdateReviewResource resource) {
         Review review = reviewRepository.findById(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Review not found"));
@@ -79,7 +79,7 @@ public class ReviewService {
         return savedReview;
     }
 
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void deleteReview(Long id) {
         Review review = reviewRepository.findById(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Review not found"));

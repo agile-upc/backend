@@ -73,7 +73,7 @@ public class ProfileService {
                 .toList();
     }
 
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public Profile createProfile(CreateProfileResource resource) throws IOException {
         Long userId = authenticatedUserService.getCurrentUser().userId();
         if (profileRepository.findByUser_Id(userId).isPresent()) {
@@ -87,7 +87,7 @@ public class ProfileService {
         return profileRepository.save(profile);
     }
 
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public Profile updateProfile(Long id, UpdateProfileResource resource) throws IOException {
         Profile profile = requireProfile(id);
         profileMapper.updateProfile(profile, resource, uploadIfPresent(resource.photo()));

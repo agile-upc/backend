@@ -57,7 +57,7 @@ public class AuthService {
         this.authMapper = authMapper;
     }
 
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public AuthenticationResult signUp(SignUpResource resource) throws IOException {
         if (userRepository.existsByUsername(resource.username())) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Username already exists");

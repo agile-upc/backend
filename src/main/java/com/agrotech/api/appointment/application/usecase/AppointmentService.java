@@ -69,7 +69,7 @@ public class AppointmentService {
         return refreshStatusIfNeeded(requireAppointment(id));
     }
 
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public Appointment createAppointment(CreateAppointmentResource resource) {
         Farmer farmer = profileService.requireCurrentFarmerEntity();
         AvailableDate availableDate = requireAvailableDate(resource.availableDateId());
@@ -109,7 +109,7 @@ public class AppointmentService {
         return appointment;
     }
 
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public Appointment updateAppointment(Long id, UpdateAppointmentResource resource) {
         Appointment appointment = requireAppointment(id);
         appointment.setMessage(resource.message());
@@ -123,7 +123,7 @@ public class AppointmentService {
         return appointmentRepository.save(appointment);
     }
 
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void deleteAppointment(Long id) {
         Appointment appointment = requireAppointment(id);
         AvailableDate availableDate = appointment.getAvailableDate();

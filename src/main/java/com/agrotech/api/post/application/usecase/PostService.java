@@ -56,14 +56,14 @@ public class PostService {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Post not found"));
     }
 
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public Post createPost(CreatePostResource resource) throws IOException {
         Advisor advisor = profileService.requireCurrentAdvisorEntity();
         Post post = postMapper.toPost(resource, advisor, uploadIfPresent(resource.image()));
         return postRepository.save(post);
     }
 
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public Post updatePost(Long id, UpdatePostResource resource) throws IOException {
         Post post = postRepository.findById(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Post not found"));
