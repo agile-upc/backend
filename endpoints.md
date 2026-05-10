@@ -10,6 +10,7 @@
 ## Request content types
 - Use `application/json` unless an endpoint is explicitly marked as `multipart/form-data`
 - `multipart/form-data` is used by:
+  - `POST /api/v1/authentication/sign-up`
   - `POST /api/v1/profiles`
   - `PUT /api/v1/profiles/{id}`
   - `POST /api/v1/posts`
@@ -22,6 +23,7 @@
 - Those URLs are intended for direct browser rendering in the client
 - This deployment assumes the upload bucket is configured for public object reads
 - The backend does not generate signed URLs for these media fields
+- Uploaded images are resized and converted to WebP before upload
 
 ## Shared structures
 
@@ -45,13 +47,19 @@ Returned by:
 Request bodies:
 
 `SignUp`
-```json
-{
-  "username": "user@example.com",
-  "password": "secret123",
-  "role": "FARMER"
-}
-```
+`multipart/form-data`
+- `username`: string, required
+- `password`: string, required
+- `role`: `ADMIN` | `ADVISOR` | `FARMER`, required
+- `firstName`: string, required
+- `lastName`: string, required
+- `city`: string, required
+- `country`: string, required
+- `birthDate`: `YYYY-MM-DD`, required
+- `description`: string, optional
+- `photo`: file, optional
+- `occupation`: string, optional
+- `experience`: integer, optional
 
 `SignIn`
 ```json
@@ -375,7 +383,7 @@ All delete endpoints return plain text, not JSON.
 
 ### IAM
 - `POST /api/v1/authentication/sign-up`
-  - request: `SignUp`
+  - request: `SignUp` multipart body with account and profile fields
   - response: `Authenticated session`
 - `POST /api/v1/authentication/sign-in`
   - request: `SignIn`

@@ -15,6 +15,7 @@ Spring Boot backend for the Agrotech platform. It provides authentication, profi
 - Base API path: `/api/v1`
 - Public routes: `/api/v1/authentication/**`, `/swagger-ui/**`, `/v3/api-docs/**`
 - All other routes require `Authorization: Bearer <token>`
+- `POST /api/v1/authentication/sign-up` creates the user and initial profile in one multipart request
 - Profile photos and post images are returned as direct public GCS URLs
 
 ## Project docs
@@ -74,6 +75,7 @@ When the app is running:
 ## Media uploads
 - Uploads are stored in Google Cloud Storage
 - `Profile.photo` and `Post.image` use direct `https://storage.googleapis.com/...` URLs
+- Uploaded images are resized and converted to WebP before upload
 - The upload bucket must allow public object reads, otherwise browsers will not be able to render those images
 
 ## Notes
