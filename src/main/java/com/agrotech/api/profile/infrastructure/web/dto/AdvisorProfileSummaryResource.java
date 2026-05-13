@@ -1,11 +1,15 @@
 package com.agrotech.api.profile.infrastructure.web.dto;
 
+import java.time.LocalDate;
+
 public record AdvisorProfileSummaryResource(
         Long profileId,
+        Long userId,
         String firstName,
         String lastName,
         String city,
         String country,
+        LocalDate birthDate,
         String description,
         String photo,
         String occupation,

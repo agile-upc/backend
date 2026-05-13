@@ -47,10 +47,12 @@ public class ProfileMapper {
                 advisor.getRating(),
                 new AdvisorProfileSummaryResource(
                         profile.getId(),
+                        profile.getUser().getId(),
                         profile.getFirstName(),
                         profile.getLastName(),
                         profile.getCity(),
                         profile.getCountry(),
+                        profile.getBirthDate(),
                         profile.getDescription(),
                         profile.getPhoto(),
                         profile.getOccupation(),
@@ -62,10 +64,12 @@ public class ProfileMapper {
     public FarmerProfileSummaryResource toFarmerProfileSummaryResource(Profile profile) {
         return new FarmerProfileSummaryResource(
                 profile.getId(),
+                profile.getUser().getId(),
                 profile.getFirstName(),
                 profile.getLastName(),
                 profile.getCity(),
                 profile.getCountry(),
+                profile.getBirthDate(),
                 profile.getDescription(),
                 profile.getPhoto(),
                 profile.getOccupation(),
