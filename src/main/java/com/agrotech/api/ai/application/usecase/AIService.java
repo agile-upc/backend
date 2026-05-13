@@ -982,10 +982,17 @@ public class AIService {
         GeminiTextResult response = generateContent(prompt, "recommendations.ready");
         JsonNode node = parseJsonResponse(response.text());
         if (node != null && node.hasNonNull("summary") && node.hasNonNull("draftAppointmentMessage")) {
-            return new NarrativeContent(
-                    node.get("summary").asText(),
-                    null,
+            String summary = normalizeRecommendationSummary(node.get("summary").asText(), bestCandidate, candidates);
+            String draftAppointmentMessage = normalizeAppointmentMessage(
                     node.get("draftAppointmentMessage").asText(),
+                    bestCandidate,
+                    candidates,
+                    farmerContext
+            );
+            return new NarrativeContent(
+                    summary,
+                    null,
+                    draftAppointmentMessage,
                     response.usedFallback()
             );
         }
@@ -1023,13 +1030,20 @@ public class AIService {
                 .append("Opciones:\n");
 
         if (status == AIRecommendationStatus.READY) {
+            prompt.append("Asesor seleccionado: ")
+                    .append(bestCandidateDescription(candidates.isEmpty() ? null : candidates.getFirst()))
+                    .append('\n');
             prompt.append("""
                     Instrucciones para summary:
+                    - Debe referirse exclusivamente al asesor seleccionado.
+                    - No cambies de asesor ni menciones otro nombre.
                     - Resume por que se selecciono a este asesor.
                     - No digas que la cita ya fue programada.
                     - No anuncies una reunion confirmada.
                     - Si no hubo una coincidencia perfecta, puedes decirlo brevemente, pero explica por que esta fue la mejor opcion disponible.
                     Instrucciones para draftAppointmentMessage:
+                    - Debe estar dirigido exclusivamente al asesor seleccionado.
+                    - No cambies de asesor ni menciones otro nombre.
                     - El mensaje se envia al asesor despues de que la cita ya fue programada.
                     - No preguntes si la cita es posible.
                     - No pidas coordinar, reservar ni agendar una cita.
@@ -1115,12 +1129,48 @@ public class AIService {
         return normalized.trim();
     }
 
-    private String normalizeRecommendationSummary(String summary, RankedAdvisorCandidate bestCandidate) {
+    private String normalizeAppointmentMessage(
+            String draftAppointmentMessage,
+            RankedAdvisorCandidate bestCandidate,
+            List<RankedAdvisorCandidate> candidates,
+            FarmerContext farmerContext
+    ) {
+        if (draftAppointmentMessage == null || draftAppointmentMessage.isBlank()) {
+            return buildAppointmentContextMessage(bestCandidate.fullName(), defaultText(farmerContext.message()));
+        }
+
+        if (mentionsDifferentCandidate(draftAppointmentMessage, bestCandidate, candidates)) {
+            return buildAppointmentContextMessage(bestCandidate.fullName(), defaultText(farmerContext.message()));
+        }
+
+        String normalized = normalizeAppointmentMessage(draftAppointmentMessage);
+        normalized = normalized.replaceFirst(
+                "(?i)^(estimad[oa]\\s+[^,]+,\\s*|hola\\s+[^,]+,\\s*)",
+                "Hola " + bestCandidate.fullName() + ", "
+        );
+
+        String lower = normalized.toLowerCase(Locale.ROOT);
+        if (!lower.startsWith("hola " + bestCandidate.fullName().toLowerCase(Locale.ROOT) + ",")) {
+            normalized = "Hola " + bestCandidate.fullName() + ", " + normalized;
+        }
+
+        return normalized.trim();
+    }
+
+    private String normalizeRecommendationSummary(
+            String summary,
+            RankedAdvisorCandidate bestCandidate,
+            List<RankedAdvisorCandidate> candidates
+    ) {
         if (summary == null || summary.isBlank()) {
             return buildSelectionSummary(bestCandidate);
         }
 
         String normalized = summary.trim().replaceAll("\\s+", " ");
+        if (mentionsDifferentCandidate(normalized, bestCandidate, candidates)) {
+            return buildSelectionSummary(bestCandidate);
+        }
+
         String lower = normalized.toLowerCase(Locale.ROOT);
         if (lower.contains("hemos programado")
                 || lower.contains("reunion virtual")
@@ -1132,6 +1182,47 @@ public class AIService {
             return buildSelectionSummary(bestCandidate);
         }
         return normalized;
+    }
+
+    private boolean mentionsDifferentCandidate(
+            String text,
+            RankedAdvisorCandidate bestCandidate,
+            List<RankedAdvisorCandidate> candidates
+    ) {
+        if (text == null || text.isBlank() || candidates == null || candidates.isEmpty()) {
+            return false;
+        }
+
+        String normalizedText = normalizeText(text);
+        if (normalizedText == null) {
+            return false;
+        }
+
+        for (RankedAdvisorCandidate candidate : candidates) {
+            if (candidate == null || candidate.advisorId().equals(bestCandidate.advisorId())) {
+                continue;
+            }
+
+            String normalizedName = normalizeText(candidate.fullName());
+            if (normalizedName != null && normalizedText.contains(normalizedName)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private String bestCandidateDescription(RankedAdvisorCandidate bestCandidate) {
+        if (bestCandidate == null) {
+            return "No especificado";
+        }
+
+        return bestCandidate.fullName()
+                + " (advisorId: " + bestCandidate.advisorId()
+                + ", ocupacion: " + defaultText(bestCandidate.occupation())
+                + ", ciudad: " + defaultText(bestCandidate.city())
+                + ", pais: " + defaultText(bestCandidate.country())
+                + ")";
     }
 
     private String buildSelectionSummary(RankedAdvisorCandidate bestCandidate) {
