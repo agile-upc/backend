@@ -9,7 +9,7 @@ Spring Boot backend for the Agrotech platform. It provides authentication, profi
 - Spring Data JPA
 - MySQL
 - Google Cloud Storage for uploaded media
-- Gemini API for AI chat
+- Gemini API for AI chat and structured advisor recommendations
 
 ## Main behavior
 - Base API path: `/api/v1`

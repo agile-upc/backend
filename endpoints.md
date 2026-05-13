@@ -122,6 +122,27 @@ Returned by:
 }
 ```
 
+`GET /api/v1/advisors/{id}` returns the full advisor summary:
+
+```json
+{
+  "advisorId": 1,
+  "userId": 3,
+  "rating": 4.8,
+  "profile": {
+    "profileId": 12,
+    "firstName": "Ana",
+    "lastName": "Lopez",
+    "city": "Cusco",
+    "country": "Peru",
+    "description": "Agricultural engineer",
+    "photo": "https://storage.googleapis.com/...",
+    "occupation": "Soil specialist",
+    "experience": 5
+  }
+}
+```
+
 ### Farmer
 Returned by:
 - `GET /api/v1/farmers`
@@ -307,6 +328,17 @@ Returned by:
   "id": 1,
   "advisorId": 2,
   "farmerId": 4,
+  "farmerProfile": {
+    "profileId": 9,
+    "firstName": "Luis",
+    "lastName": "Quispe",
+    "city": "Cusco",
+    "country": "Peru",
+    "description": "Small-scale farmer",
+    "photo": "https://storage.googleapis.com/...",
+    "occupation": "Potato farmer",
+    "experience": 6
+  },
   "comment": "Very helpful session",
   "rating": 5
 }
@@ -356,6 +388,52 @@ Response body:
   "advisorId": 2
 }
 ```
+
+### AI recommendations
+Returned by:
+- `POST /api/v1/ai/recommendations`
+
+Request body:
+
+```json
+{
+  "message": "Necesito ayuda con la fertilizacion del suelo"
+}
+```
+
+The backend uses the authenticated farmer profile location when available. If the profile does not have `city` or `country`, location is simply ignored in the ranking score.
+
+Response body:
+
+```json
+{
+  "status": "READY",
+  "selectedAdvisorId": 2,
+  "matches": [
+    {
+      "advisorId": 2,
+      "fullName": "Ana Lopez",
+      "occupation": "Soil specialist",
+      "rating": 4.8,
+      "experience": 5,
+      "city": "Cusco",
+      "country": "Peru",
+      "nextAvailableDate": "2026-05-14",
+      "why": "esta en tu misma ciudad, su perfil se alinea con tu necesidad, tiene una calificacion de 4.8, 5 años de experiencia, tiene disponibilidad desde 2026-05-14."
+    }
+  ],
+  "summary": "La mejor opcion es Ana Lopez por su cercania, experiencia y disponibilidad.",
+  "clarifyingQuestion": null,
+  "draftAppointmentMessage": "Hola Ana Lopez, necesito asesoria sobre la fertilizacion del suelo de mi cultivo. Me gustaria coordinar una cita para revisar mi caso."
+}
+```
+
+Rules:
+- `status` is `READY`, `NEEDS_MORE_INFO`, or `UNAVAILABLE`
+- `selectedAdvisorId` is only present when the service has enough confidence to recommend one advisor directly
+- `matches` contains up to 3 ranked advisors
+- `clarifyingQuestion` is used when the request needs more detail
+- `draftAppointmentMessage` is only intended for the booking flow
 
 ## Error response structure
 When the backend returns an error body, it uses:
@@ -409,7 +487,7 @@ All delete endpoints return plain text, not JSON.
 - `GET /api/v1/advisors`
   - response: `Advisor`
 - `GET /api/v1/advisors/{id}`
-  - response: `Advisor`
+  - response: `Advisor catalog item`
 - `DELETE /api/v1/advisors/{id}`
   - response: plain text success message
 - `GET /api/v1/farmers`
@@ -492,6 +570,9 @@ All delete endpoints return plain text, not JSON.
 - `POST /api/v1/ai/chat`
   - request: AI chat body
   - response: AI chat response
+- `POST /api/v1/ai/recommendations`
+  - request: AI recommendations body
+  - response: AI recommendations response
 
 ## Frontend implementation notes
 - Use `userId`, `profileId`, `farmerId`, and `advisorId` from the auth response to decide which screens and queries to show

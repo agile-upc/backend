@@ -1,6 +1,8 @@
 package com.agrotech.api.ai.infrastructure.web.controller;
 
 import com.agrotech.api.ai.application.usecase.AIService;
+import com.agrotech.api.ai.infrastructure.web.dto.AIRecommendationRequestDto;
+import com.agrotech.api.ai.infrastructure.web.dto.AIRecommendationResponseDto;
 import com.agrotech.api.ai.infrastructure.web.dto.AIRequestDto;
 import com.agrotech.api.ai.infrastructure.web.dto.AIResponseDto;
 import com.agrotech.api.profile.application.usecase.AdvisorService;
@@ -35,5 +37,11 @@ public class AIController {
                         advisorService.getAdvisorRecommendationOptions()
                 )
         );
+    }
+
+    @Operation(summary = "Recomendacion estructurada para agendar asesoria")
+    @PostMapping("/recommendations")
+    public ResponseEntity<AIRecommendationResponseDto> recommend(@RequestBody AIRecommendationRequestDto request) {
+        return ResponseEntity.ok(aiService.recommendAdvisors(request));
     }
 }
