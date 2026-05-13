@@ -270,6 +270,7 @@ Rules:
 - `startTime` and `endTime` use `HH:mm`
 - `startTime` must be before `endTime`
 - `status` is `AVAILABLE` or `UNAVAILABLE`
+- `GET /api/v1/available_dates` returns slots ordered by nearest `scheduledDate` first, then by `startTime`
 
 ### Appointment
 Returned by:
@@ -290,6 +291,20 @@ Returned by:
     "endTime": "10:00",
     "status": "UNAVAILABLE"
   },
+  "advisorProfileSummary": {
+    "profileId": 12,
+    "userId": 8,
+    "firstName": "Ana",
+    "lastName": "Lopez",
+    "city": "Cusco",
+    "country": "Peru",
+    "birthDate": "1990-06-10",
+    "description": "Specialist in irrigation and soil management",
+    "photo": "https://storage.googleapis.com/...",
+    "occupation": "Agricultural advisor",
+    "experience": 8
+  },
+  "farmerProfileSummary": null,
   "message": "I need help with irrigation planning",
   "status": "PENDING",
   "meetingUrl": "https://..."
@@ -319,6 +334,9 @@ Notes:
 - create uses the currently authenticated farmer
 - the backend generates `meetingUrl`
 - `GET /api/v1/appointments` uses the authenticated user to decide the list scope
+- if the authenticated user is a `FARMER`, the response includes `advisorProfileSummary`
+- if the authenticated user is an `ADVISOR`, the response includes `farmerProfileSummary`
+- the non-applicable profile summary field is returned as `null`
 
 ### Review
 Returned by:
@@ -665,6 +683,7 @@ All delete endpoints return plain text, not JSON.
 ### Available dates
 - `GET /api/v1/available_dates`
   - query params: optional `advisorId`, optional `isAvailable`
+  - ordered by nearest `scheduledDate` first, then `startTime`
   - response: `Array<Available date>`
 - `GET /api/v1/available_dates/{id}`
   - response: `Available date`
@@ -679,8 +698,14 @@ All delete endpoints return plain text, not JSON.
 
 ### Appointments
 - `GET /api/v1/appointments`
+  - role-aware response:
+  - `FARMER` receives `advisorProfileSummary`
+  - `ADVISOR` receives `farmerProfileSummary`
   - response: `Array<Appointment>`
 - `GET /api/v1/appointments/{id}`
+  - role-aware response:
+  - `FARMER` receives `advisorProfileSummary`
+  - `ADVISOR` receives `farmerProfileSummary`
   - response: `Appointment`
 - `POST /api/v1/appointments`
   - request: appointment create body

@@ -32,13 +32,16 @@ public class AvailableDateService {
         List<AvailableDate> availableDates;
 
         if (advisorId != null && isAvailable != null) {
-            availableDates = availableDateRepository.findByAdvisor_IdAndStatus(advisorId, toStatus(isAvailable));
+            availableDates = availableDateRepository.findByAdvisor_IdAndStatusOrderByScheduledDateAscStartTimeAsc(
+                    advisorId,
+                    toStatus(isAvailable)
+            );
         } else if (advisorId != null) {
-            availableDates = availableDateRepository.findByAdvisor_Id(advisorId);
+            availableDates = availableDateRepository.findByAdvisor_IdOrderByScheduledDateAscStartTimeAsc(advisorId);
         } else if (isAvailable != null) {
-            availableDates = availableDateRepository.findByStatus(toStatus(isAvailable));
+            availableDates = availableDateRepository.findByStatusOrderByScheduledDateAscStartTimeAsc(toStatus(isAvailable));
         } else {
-            availableDates = availableDateRepository.findAll();
+            availableDates = availableDateRepository.findAllByOrderByScheduledDateAscStartTimeAsc();
         }
 
         return availableDates.stream()

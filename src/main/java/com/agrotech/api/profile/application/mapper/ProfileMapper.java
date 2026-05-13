@@ -45,19 +45,23 @@ public class ProfileMapper {
                 advisor.getId(),
                 advisor.getUser().getId(),
                 advisor.getRating(),
-                new AdvisorProfileSummaryResource(
-                        profile.getId(),
-                        profile.getUser().getId(),
-                        profile.getFirstName(),
-                        profile.getLastName(),
-                        profile.getCity(),
-                        profile.getCountry(),
-                        profile.getBirthDate(),
-                        profile.getDescription(),
-                        profile.getPhoto(),
-                        profile.getOccupation(),
-                        profile.getExperience()
-                )
+                toAdvisorProfileSummaryResource(profile)
+        );
+    }
+
+    public AdvisorProfileSummaryResource toAdvisorProfileSummaryResource(Profile profile) {
+        return new AdvisorProfileSummaryResource(
+                profile.getId(),
+                profile.getUser().getId(),
+                profile.getFirstName(),
+                profile.getLastName(),
+                profile.getCity(),
+                profile.getCountry(),
+                profile.getBirthDate(),
+                profile.getDescription(),
+                profile.getPhoto(),
+                profile.getOccupation(),
+                profile.getExperience()
         );
     }
 
