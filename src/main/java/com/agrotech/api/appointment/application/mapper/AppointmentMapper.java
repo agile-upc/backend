@@ -6,10 +6,20 @@ import com.agrotech.api.appointment.infrastructure.web.dto.ReviewResource;
 import com.agrotech.api.appointment.domain.model.Appointment;
 import com.agrotech.api.appointment.domain.model.AvailableDate;
 import com.agrotech.api.appointment.domain.model.Review;
+import com.agrotech.api.profile.application.mapper.ProfileMapper;
+import com.agrotech.api.profile.application.usecase.ProfileService;
 import org.springframework.stereotype.Component;
 
 @Component
 public class AppointmentMapper {
+    private final ProfileService profileService;
+    private final ProfileMapper profileMapper;
+
+    public AppointmentMapper(ProfileService profileService, ProfileMapper profileMapper) {
+        this.profileService = profileService;
+        this.profileMapper = profileMapper;
+    }
+
     public AppointmentResource toAppointmentResource(Appointment appointment) {
         return new AppointmentResource(
                 appointment.getId(),
@@ -37,6 +47,9 @@ public class AppointmentMapper {
                 review.getId(),
                 review.getAdvisor().getId(),
                 review.getFarmer().getId(),
+                profileMapper.toFarmerProfileSummaryResource(
+                        profileService.getProfileEntityByFarmerId(review.getFarmer().getId())
+                ),
                 review.getComment(),
                 review.getRating()
         );

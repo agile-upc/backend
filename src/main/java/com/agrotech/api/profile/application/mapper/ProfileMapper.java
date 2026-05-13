@@ -6,6 +6,7 @@ import com.agrotech.api.profile.infrastructure.web.dto.AdvisorCatalogResource;
 import com.agrotech.api.profile.infrastructure.web.dto.AdvisorProfileSummaryResource;
 import com.agrotech.api.profile.infrastructure.web.dto.CreateProfileResource;
 import com.agrotech.api.profile.infrastructure.web.dto.FarmerResource;
+import com.agrotech.api.profile.infrastructure.web.dto.FarmerProfileSummaryResource;
 import com.agrotech.api.profile.infrastructure.web.dto.ProfileResource;
 import com.agrotech.api.profile.infrastructure.web.dto.UpdateProfileResource;
 import com.agrotech.api.profile.domain.model.Advisor;
@@ -55,6 +56,20 @@ public class ProfileMapper {
                         profile.getOccupation(),
                         profile.getExperience()
                 )
+        );
+    }
+
+    public FarmerProfileSummaryResource toFarmerProfileSummaryResource(Profile profile) {
+        return new FarmerProfileSummaryResource(
+                profile.getId(),
+                profile.getFirstName(),
+                profile.getLastName(),
+                profile.getCity(),
+                profile.getCountry(),
+                profile.getDescription(),
+                profile.getPhoto(),
+                profile.getOccupation(),
+                profile.getExperience()
         );
     }
 

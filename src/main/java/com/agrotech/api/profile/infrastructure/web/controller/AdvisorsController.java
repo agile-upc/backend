@@ -41,8 +41,8 @@ public class AdvisorsController {
     }
 
     @GetMapping("/{id}")
-    public ResponseEntity<AdvisorResource> getAdvisorById(@PathVariable Long id) {
-        return ResponseEntity.ok(profileMapper.toAdvisorResource(advisorService.getAdvisorById(id)));
+    public ResponseEntity<AdvisorCatalogResource> getAdvisorById(@PathVariable Long id) {
+        return ResponseEntity.ok(advisorService.getAdvisorCatalogById(id));
     }
 
     @DeleteMapping("/{id}")

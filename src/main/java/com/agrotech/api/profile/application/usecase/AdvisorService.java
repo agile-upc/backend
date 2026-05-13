@@ -45,6 +45,14 @@ public class AdvisorService {
                 .toList();
     }
 
+    public AdvisorCatalogResource getAdvisorCatalogById(Long id) {
+        Advisor advisor = getAdvisorEntity(id);
+        return profileMapper.toAdvisorCatalogResource(
+                advisor,
+                getProfileByUserId(advisor.getUser().getId())
+        );
+    }
+
     public Advisor getAdvisorById(Long id) {
         return getAdvisorEntity(id);
     }

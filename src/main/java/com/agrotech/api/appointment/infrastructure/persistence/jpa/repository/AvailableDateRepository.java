@@ -12,6 +12,10 @@ public interface AvailableDateRepository extends JpaRepository<AvailableDate, Lo
     List<AvailableDate> findByAdvisor_Id(Long advisorId);
     List<AvailableDate> findByAdvisor_IdAndStatus(Long advisor_id, AvailableDateStatus status);
     List<AvailableDate> findByStatus(AvailableDateStatus availableDateStatus);
+    List<AvailableDate> findByStatusAndScheduledDateGreaterThanEqualOrderByScheduledDateAscStartTimeAsc(
+            AvailableDateStatus status,
+            LocalDate scheduledDate
+    );
     Optional<AvailableDate> findByAdvisor_IdAndScheduledDateAndStartTimeAndEndTime(Long advisorId, LocalDate scheduledDate, String startTime, String endTime
     );
 }
