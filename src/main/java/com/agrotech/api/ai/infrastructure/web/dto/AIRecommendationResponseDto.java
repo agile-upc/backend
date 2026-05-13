@@ -8,6 +8,10 @@ public record AIRecommendationResponseDto(
         List<AIRecommendationMatchDto> matches,
         String summary,
         String clarifyingQuestion,
-        String draftAppointmentMessage
+        String draftAppointmentMessage,
+        String conversationId,
+        int questionsAsked,
+        int maxQuestions,
+        boolean usedFallback
 ) {
 }

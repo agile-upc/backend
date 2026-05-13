@@ -6,35 +6,49 @@ import com.agrotech.api.ai.infrastructure.web.dto.AIRecommendationResponseDto;
 import com.agrotech.api.ai.infrastructure.web.dto.AIRecommendationStatus;
 import com.agrotech.api.ai.infrastructure.web.dto.AIResponseDto;
 import com.agrotech.api.appointment.domain.valueobject.AvailableDateStatus;
-import com.agrotech.api.appointment.infrastructure.persistence.jpa.repository.AvailableDateRepository;
 import com.agrotech.api.iam.application.usecase.AuthenticatedUserService;
 import com.agrotech.api.iam.domain.model.AuthenticatedUser;
 import com.agrotech.api.iam.domain.valueobject.UserRole;
 import com.agrotech.api.profile.application.usecase.AdvisorService;
 import com.agrotech.api.profile.application.usecase.ProfileService;
-import com.agrotech.api.profile.domain.model.Advisor;
 import com.agrotech.api.profile.domain.model.Profile;
+import com.agrotech.api.profile.infrastructure.persistence.jpa.projection.AdvisorRecommendationProjection;
+import com.agrotech.api.profile.infrastructure.persistence.jpa.repository.AdvisorRepository;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.google.genai.Client;
-import com.google.genai.types.GenerateContentResponse;
+import com.google.auth.oauth2.AccessToken;
+import com.google.auth.oauth2.GoogleCredentials;
 import jakarta.annotation.PostConstruct;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Service;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
 
+import java.io.IOException;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -43,11 +57,19 @@ import java.util.stream.Collectors;
 public class AIService {
     private static final Logger LOGGER = LoggerFactory.getLogger(AIService.class);
     private static final Pattern ADVISOR_ID_PATTERN = Pattern.compile("(?im)^\\s*advisorId\\s*[:\\-]?\\s*(\\d+)\\s*$");
+    private static final Pattern TOKEN_SPLITTER = Pattern.compile("[^\\p{L}\\p{N}]+");
+    private static final String DEFAULT_VERTEX_LOCATION = "global";
+    private static final String DEFAULT_MODEL_ID = "gemini-2.5-flash-preview-09-2025";
+    private static final String CLOUD_PLATFORM_SCOPE = "https://www.googleapis.com/auth/cloud-platform";
     private static final String INVALID_REQUEST_MESSAGE = "Necesito un poco mas de contexto para recomendarte un asesor. Indicame el tema, el problema que tienes y, si aplica, tu ubicacion.";
     private static final String INVALID_ADVISOR_MESSAGE = "Pude orientarte de forma general, pero no pude identificar un asesor valido. Intenta dar mas detalles para recomendarte uno correctamente.";
     private static final String GENERIC_FAILURE_MESSAGE = "No se pudo procesar tu solicitud en este momento. Intenta nuevamente mas tarde.";
     private static final int FINAL_MATCH_LIMIT = 3;
     private static final int SEMANTIC_CANDIDATE_LIMIT = 5;
+    private static final int MAX_CLARIFYING_QUESTIONS = 1;
+    private static final Duration DEFAULT_SESSION_TTL = Duration.ofMinutes(15);
+    private static final DateTimeFormatter HUMAN_DATE_FORMATTER =
+            DateTimeFormatter.ofPattern("d 'de' MMMM 'de' yyyy", new Locale("es", "PE"));
     private static final double LOCATION_CITY_SCORE = 45.0;
     private static final double LOCATION_COUNTRY_SCORE = 25.0;
     private static final double MAX_RATING_SCORE = 20.0;
@@ -58,36 +80,103 @@ public class AIService {
     private static final double MAX_SEMANTIC_SCORE = 8.0;
     private static final double READY_GAP_THRESHOLD = 6.0;
 
-    @Value("${GEMINI_API_KEY}")
-    private String apiKey;
+    @Value("${VERTEX_AI_PROJECT_ID:${GCS_PROJECT_ID:}}")
+    private String vertexAiProjectId;
 
-    private final AvailableDateRepository availableDateRepository;
+    @Value("${VERTEX_AI_LOCATION:" + DEFAULT_VERTEX_LOCATION + "}")
+    private String vertexAiLocation;
+
+    @Value("${VERTEX_AI_MODEL_ID:" + DEFAULT_MODEL_ID + "}")
+    private String vertexAiModelId;
+
+    private final AdvisorRepository advisorRepository;
     private final ProfileService profileService;
     private final AuthenticatedUserService authenticatedUserService;
     private final ObjectMapper objectMapper;
-    private Client client;
+    private final Clock clock;
+    private final Duration sessionTtl;
+    private final GeminiGateway geminiGateway;
+    private final Map<String, RecommendationSession> recommendationSessions = new ConcurrentHashMap<>();
+    private HttpClient httpClient;
+    private GoogleCredentials googleCredentials;
 
+    @Autowired
     public AIService(
-            AvailableDateRepository availableDateRepository,
+            AdvisorRepository advisorRepository,
             ProfileService profileService,
             AuthenticatedUserService authenticatedUserService,
             ObjectMapper objectMapper
     ) {
-        this.availableDateRepository = availableDateRepository;
+        this(
+                advisorRepository,
+                profileService,
+                authenticatedUserService,
+                objectMapper,
+                Clock.systemDefaultZone(),
+                DEFAULT_SESSION_TTL,
+                null
+        );
+    }
+
+    AIService(
+            AdvisorRepository advisorRepository,
+            ProfileService profileService,
+            AuthenticatedUserService authenticatedUserService,
+            ObjectMapper objectMapper,
+            Clock clock,
+            Duration sessionTtl
+    ) {
+        this(
+                advisorRepository,
+                profileService,
+                authenticatedUserService,
+                objectMapper,
+                clock,
+                sessionTtl,
+                null
+        );
+    }
+
+    AIService(
+            AdvisorRepository advisorRepository,
+            ProfileService profileService,
+            AuthenticatedUserService authenticatedUserService,
+            ObjectMapper objectMapper,
+            Clock clock,
+            Duration sessionTtl,
+            GeminiGateway geminiGateway
+    ) {
+        this.advisorRepository = advisorRepository;
         this.profileService = profileService;
         this.authenticatedUserService = authenticatedUserService;
         this.objectMapper = objectMapper;
+        this.clock = clock;
+        this.sessionTtl = sessionTtl;
+        this.geminiGateway = geminiGateway == null ? this::requestGeminiContent : geminiGateway;
     }
 
     @PostConstruct
     public void instanceGemini() {
-        if (apiKey == null || apiKey.isBlank()) {
+        if (vertexAiProjectId == null || vertexAiProjectId.isBlank()) {
+            LOGGER.warn("Vertex AI is disabled because VERTEX_AI_PROJECT_ID is not configured");
             return;
         }
 
-        client = Client.builder()
-                .apiKey(apiKey)
-                .build();
+        try {
+            googleCredentials = GoogleCredentials.getApplicationDefault()
+                    .createScoped(List.of(CLOUD_PLATFORM_SCOPE));
+            httpClient = HttpClient.newHttpClient();
+            LOGGER.info(
+                    "Vertex AI initialized [projectId={}, location={}, modelId={}]",
+                    vertexAiProjectId,
+                    vertexAiLocation,
+                    vertexAiModelId
+            );
+        } catch (IOException exception) {
+            LOGGER.warn("No se pudo inicializar Vertex AI con Application Default Credentials: {}", exception.getMessage());
+            googleCredentials = null;
+            httpClient = null;
+        }
     }
 
     public AIResponseDto recommendAdvisor(String userMessage, List<AdvisorService.AdvisorRecommendationOption> advisors) {
@@ -99,76 +188,417 @@ public class AIService {
             return new AIResponseDto("No hay asesores disponibles en este momento.", null);
         }
 
-        String response = generateContent(buildPrompt(userMessage, advisors));
-        if (response == null || response.isBlank()) {
+        GeminiTextResult response = generateContent(buildPrompt(userMessage, advisors), "chat.recommend");
+        if (response.text() == null || response.text().isBlank()) {
             return new AIResponseDto(GENERIC_FAILURE_MESSAGE, null);
         }
 
-        return buildRecommendation(response, advisors);
+        return buildRecommendation(response.text(), advisors);
     }
 
     public AIRecommendationResponseDto recommendAdvisors(AIRecommendationRequestDto request) {
-        FarmerContext farmerContext = resolveFarmerContext(request);
-        if (farmerContext.message().isBlank()) {
-            return new AIRecommendationResponseDto(
-                    AIRecommendationStatus.NEEDS_MORE_INFO,
-                    null,
-                    List.of(),
-                    "Necesito un poco mas de contexto para sugerirte asesores.",
-                    "Que tipo de problema agricola necesitas resolver y en que ubicacion te encuentras?",
-                    null
-            );
+        RecommendationSession activeSession = getActiveSession(normalizeConversationId(request == null ? null : request.conversationId()));
+        if (activeSession != null) {
+            return continueRecommendationSession(activeSession, request);
         }
+        return startRecommendationSession(request);
+    }
 
-        List<RankedAdvisorCandidate> rankedCandidates = buildRankedCandidates(farmerContext);
-        if (rankedCandidates.isEmpty()) {
-            return new AIRecommendationResponseDto(
+    private AIRecommendationResponseDto startRecommendationSession(AIRecommendationRequestDto request) {
+        FarmerContext farmerContext = resolveFarmerContext(request == null ? null : request.message());
+        boolean shouldAttemptGemini = shouldAttemptGemini(farmerContext.message());
+        if (!shouldAttemptGemini) {
+            logFallback("recommendations.start", "Gemini skipped because the message was blank or too vague", farmerContext.message());
+        }
+        RankingResult rankingResult = buildRankedCandidates(farmerContext, shouldAttemptGemini);
+
+        if (rankingResult.candidates().isEmpty()) {
+            return buildResponse(
                     AIRecommendationStatus.UNAVAILABLE,
                     null,
                     List.of(),
                     "No hay asesores disponibles con informacion suficiente para recomendarte una opcion ahora mismo.",
                     null,
-                    null
+                    null,
+                    null,
+                    0,
+                    true
             );
         }
 
-        List<RankedAdvisorCandidate> topCandidates = rankedCandidates.stream()
+        List<RankedAdvisorCandidate> topCandidates = rankingResult.candidates().stream()
                 .limit(FINAL_MATCH_LIMIT)
                 .toList();
-        AIRecommendationStatus status = determineStatus(farmerContext.message(), rankedCandidates);
-        Long selectedAdvisorId = status == AIRecommendationStatus.READY ? topCandidates.getFirst().advisor().getId() : null;
-        String summary = buildSummary(farmerContext, topCandidates, status);
-        String clarifyingQuestion = status == AIRecommendationStatus.NEEDS_MORE_INFO
-                ? buildClarifyingQuestion(farmerContext, topCandidates)
-                : null;
-        String draftAppointmentMessage = status == AIRecommendationStatus.READY
-                ? buildDraftAppointmentMessage(farmerContext, topCandidates.getFirst())
-                : null;
+        AIRecommendationStatus status = determineStatus(farmerContext.message(), rankingResult.candidates());
 
-        return new AIRecommendationResponseDto(
-                status,
-                selectedAdvisorId,
-                topCandidates.stream()
-                        .map(candidate -> toMatchDto(candidate, farmerContext))
-                        .toList(),
-                summary,
-                clarifyingQuestion,
-                draftAppointmentMessage
+        if (status == AIRecommendationStatus.NEEDS_MORE_INFO) {
+            NarrativeContent narrative = buildNeedsMoreInfoNarrative(farmerContext, topCandidates, shouldAttemptGemini);
+            String conversationId = UUID.randomUUID().toString();
+            recommendationSessions.put(
+                    conversationId,
+                    new RecommendationSession(
+                            conversationId,
+                            farmerContext,
+                            topCandidates,
+                            1,
+                            rankingResult.usedFallback() || narrative.usedFallback(),
+                            Instant.now(clock).plus(sessionTtl)
+                    )
+            );
+            return buildResponse(
+                    AIRecommendationStatus.NEEDS_MORE_INFO,
+                    null,
+                    topCandidates,
+                    narrative.summary(),
+                    narrative.clarifyingQuestion(),
+                    null,
+                    conversationId,
+                    1,
+                    rankingResult.usedFallback() || narrative.usedFallback()
+            );
+        }
+
+        RankedAdvisorCandidate bestCandidate = topCandidates.getFirst();
+        NarrativeContent narrative = buildReadyNarrative(farmerContext, bestCandidate, topCandidates, shouldAttemptGemini);
+        return buildResponse(
+                AIRecommendationStatus.READY,
+                bestCandidate.advisorId(),
+                topCandidates,
+                narrative.summary(),
+                null,
+                narrative.draftAppointmentMessage(),
+                null,
+                0,
+                rankingResult.usedFallback() || narrative.usedFallback()
         );
     }
 
-    private String generateContent(String prompt) {
-        if (client == null) {
+    private AIRecommendationResponseDto continueRecommendationSession(RecommendationSession session, AIRecommendationRequestDto request) {
+        recommendationSessions.remove(session.conversationId());
+
+        FarmerContext mergedContext = session.farmerContext().withMessage(
+                mergeMessages(session.farmerContext().message(), request == null ? null : request.message())
+        );
+        boolean shouldAttemptGemini = shouldAttemptGemini(mergedContext.message());
+        LOGGER.info(
+                "Recommendation session using cached shortlist for final decision [conversationId={}, questionsAsked={}, geminiEnabled={}]",
+                session.conversationId(),
+                session.questionsAsked(),
+                shouldAttemptGemini
+        );
+        List<RankedAdvisorCandidate> topCandidates = session.candidates();
+        if (topCandidates.isEmpty()) {
+            return buildResponse(
+                    AIRecommendationStatus.UNAVAILABLE,
+                    null,
+                    List.of(),
+                    "No hay asesores disponibles con informacion suficiente para recomendarte una opcion ahora mismo.",
+                    null,
+                    null,
+                    session.conversationId(),
+                    session.questionsAsked(),
+                    session.fallbackMode()
+            );
+        }
+
+        RankedAdvisorCandidate bestCandidate = topCandidates.getFirst();
+        NarrativeContent narrative = buildReadyNarrative(mergedContext, bestCandidate, topCandidates, shouldAttemptGemini);
+        return buildResponse(
+                AIRecommendationStatus.READY,
+                bestCandidate.advisorId(),
+                topCandidates,
+                narrative.summary(),
+                null,
+                narrative.draftAppointmentMessage(),
+                session.conversationId(),
+                session.questionsAsked(),
+                narrative.usedFallback()
+        );
+    }
+
+    private RecommendationSession getActiveSession(String conversationId) {
+        if (conversationId == null) {
             return null;
         }
 
-        try {
-            GenerateContentResponse response = client.models.generateContent("gemini-2.5-flash", prompt, null);
-            return response.text();
-        } catch (Exception e) {
-            LOGGER.warn("Error al procesar la solicitud a Gemini: {}", e.getMessage());
+        RecommendationSession session = recommendationSessions.get(conversationId);
+        if (session == null) {
             return null;
         }
+
+        if (!session.expiresAt().isAfter(Instant.now(clock))) {
+            recommendationSessions.remove(conversationId);
+            LOGGER.info("Recommendation session expired [conversationId={}]", conversationId);
+            return null;
+        }
+
+        return session;
+    }
+
+    private RankingResult buildRankedCandidates(FarmerContext farmerContext, boolean shouldAttemptGemini) {
+        LocalDate today = LocalDate.now(clock);
+        List<RankedAdvisorCandidate> deterministicCandidates = advisorRepository.findRecommendationInputs(
+                        AvailableDateStatus.AVAILABLE,
+                        today
+                ).stream()
+                .map(projection -> toRankedCandidate(projection, farmerContext))
+                .sorted(baseCandidateComparator())
+                .toList();
+
+        if (deterministicCandidates.isEmpty()) {
+            return new RankingResult(List.of(), true);
+        }
+
+        SemanticScoringResult semanticScoringResult = scoreSemanticSimilarity(
+                farmerContext.message(),
+                deterministicCandidates.stream().limit(SEMANTIC_CANDIDATE_LIMIT).toList(),
+                shouldAttemptGemini
+        );
+
+        List<RankedAdvisorCandidate> rankedCandidates = deterministicCandidates.stream()
+                .map(candidate -> candidate.withSemanticScore(
+                        semanticScoringResult.scores().getOrDefault(candidate.advisorId(), 0.0)
+                ))
+                .sorted(finalCandidateComparator())
+                .toList();
+
+        return new RankingResult(rankedCandidates, semanticScoringResult.usedFallback());
+    }
+
+    private RankedAdvisorCandidate toRankedCandidate(AdvisorRecommendationProjection projection, FarmerContext farmerContext) {
+        double locationScore = computeLocationScore(farmerContext, projection);
+        double ratingScore = computeRatingScore(projection.getRating());
+        double experienceScore = computeExperienceScore(projection.getExperience());
+        double availabilityScore = computeAvailabilityScore(projection.getNextAvailableDate());
+        double lexicalScore = computeLexicalScore(farmerContext.message(), projection.getOccupation(), projection.getDescription());
+
+        return new RankedAdvisorCandidate(
+                projection.getAdvisorId(),
+                projection.getUserId(),
+                projection.getRating(),
+                projection.getFirstName(),
+                projection.getLastName(),
+                projection.getCity(),
+                projection.getCountry(),
+                projection.getDescription(),
+                projection.getPhoto(),
+                projection.getOccupation(),
+                projection.getExperience(),
+                projection.getNextAvailableDate(),
+                locationScore + ratingScore + experienceScore + availabilityScore + lexicalScore,
+                0.0,
+                lexicalScore,
+                locationScore,
+                ratingScore,
+                experienceScore,
+                availabilityScore
+        );
+    }
+
+    private Comparator<RankedAdvisorCandidate> baseCandidateComparator() {
+        return Comparator.comparingDouble(RankedAdvisorCandidate::baseScore).reversed()
+                .thenComparing(RankedAdvisorCandidate::rating, Comparator.nullsLast(Comparator.reverseOrder()))
+                .thenComparing(RankedAdvisorCandidate::experience, Comparator.nullsLast(Comparator.reverseOrder()))
+                .thenComparing(RankedAdvisorCandidate::nextAvailableDate, Comparator.nullsLast(Comparator.naturalOrder()))
+                .thenComparing(RankedAdvisorCandidate::advisorId);
+    }
+
+    private Comparator<RankedAdvisorCandidate> finalCandidateComparator() {
+        return Comparator.comparingDouble(RankedAdvisorCandidate::finalScore).reversed()
+                .thenComparing(RankedAdvisorCandidate::rating, Comparator.nullsLast(Comparator.reverseOrder()))
+                .thenComparing(RankedAdvisorCandidate::experience, Comparator.nullsLast(Comparator.reverseOrder()))
+                .thenComparing(RankedAdvisorCandidate::nextAvailableDate, Comparator.nullsLast(Comparator.naturalOrder()))
+                .thenComparing(RankedAdvisorCandidate::advisorId);
+    }
+
+    private AIRecommendationResponseDto buildResponse(
+            AIRecommendationStatus status,
+            Long selectedAdvisorId,
+            List<RankedAdvisorCandidate> candidates,
+            String summary,
+            String clarifyingQuestion,
+            String draftAppointmentMessage,
+            String conversationId,
+            int questionsAsked,
+            boolean usedFallback
+    ) {
+        return new AIRecommendationResponseDto(
+                status,
+                selectedAdvisorId,
+                candidates.stream().map(this::toMatchDto).toList(),
+                summary,
+                clarifyingQuestion,
+                normalizeAppointmentMessage(draftAppointmentMessage),
+                conversationId,
+                questionsAsked,
+                MAX_CLARIFYING_QUESTIONS,
+                usedFallback
+        );
+    }
+
+    private GeminiTextResult generateContent(String prompt, String flow) {
+        try {
+            String response = geminiGateway.generate(prompt);
+            if (response == null || response.isBlank()) {
+                logFallback(flow, "Gemini returned an empty response", prompt);
+                return GeminiTextResult.failure(GeminiFailureType.UNAVAILABLE);
+            }
+            return GeminiTextResult.success(response);
+        } catch (Exception exception) {
+            GeminiFailureType failureType = classifyGeminiFailure(exception);
+            LOGGER.warn(
+                    "Gemini request failed [flow={}, classification={}, message={}]",
+                    flow,
+                    failureType,
+                    exception.getMessage()
+            );
+            return GeminiTextResult.failure(failureType);
+        }
+    }
+
+    private String requestGeminiContent(String prompt) throws Exception {
+        if (httpClient == null || googleCredentials == null) {
+            logFallback("vertex.request", "Vertex AI client is not initialized", prompt);
+            return null;
+        }
+
+        String projectId = normalizeVertexConfig(vertexAiProjectId);
+        String location = normalizeVertexConfig(vertexAiLocation);
+        String modelId = normalizeVertexConfig(vertexAiModelId);
+        if (projectId == null || location == null || modelId == null) {
+            logFallback(
+                    "vertex.request",
+                    "Vertex AI configuration is incomplete",
+                    "projectId=" + projectId + ", location=" + location + ", modelId=" + modelId
+            );
+            return null;
+        }
+
+        AccessToken accessToken = refreshAccessToken();
+        String requestBody = buildVertexRequestBody(prompt);
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(buildVertexEndpoint(projectId, location, modelId)))
+                .header("Authorization", "Bearer " + accessToken.getTokenValue())
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(requestBody))
+                .build();
+
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        if (response.statusCode() >= 400) {
+            throw new IOException("Vertex AI error " + response.statusCode() + ": " + response.body());
+        }
+
+        return extractTextFromVertexResponse(response.body());
+    }
+
+    private GeminiFailureType classifyGeminiFailure(Exception exception) {
+        String message = exception.getMessage();
+        if (message == null) {
+            return GeminiFailureType.OTHER;
+        }
+
+        String normalized = message.toLowerCase(Locale.ROOT);
+        if (normalized.contains("429")
+                || normalized.contains("quota")
+                || normalized.contains("rate limit")
+                || normalized.contains("too many requests")
+                || normalized.contains("retry-after")
+                || normalized.contains("resource exhausted")) {
+            return GeminiFailureType.RATE_LIMIT;
+        }
+
+        return GeminiFailureType.OTHER;
+    }
+
+    private AccessToken refreshAccessToken() throws IOException {
+        googleCredentials.refreshIfExpired();
+        AccessToken accessToken = googleCredentials.getAccessToken();
+        if (accessToken == null || accessToken.getTokenValue() == null || accessToken.getTokenValue().isBlank()) {
+            throw new IOException("No access token available for Vertex AI");
+        }
+        return accessToken;
+    }
+
+    private String buildVertexRequestBody(String prompt) throws JsonProcessingException {
+        Map<String, Object> payload = Map.of(
+                "contents",
+                List.of(
+                        Map.of(
+                                "role", "user",
+                                "parts", List.of(Map.of("text", prompt))
+                        )
+                )
+        );
+        return objectMapper.writeValueAsString(payload);
+    }
+
+    private String buildVertexEndpoint(String projectId, String location, String modelId) {
+        return "https://aiplatform.googleapis.com/v1/projects/"
+                + projectId
+                + "/locations/"
+                + location
+                + "/publishers/google/models/"
+                + modelId
+                + ":generateContent";
+    }
+
+    private String extractTextFromVertexResponse(String responseBody) throws JsonProcessingException {
+        JsonNode root = objectMapper.readTree(responseBody);
+        JsonNode candidates = root.path("candidates");
+        if (!candidates.isArray()) {
+            logFallback("vertex.response", "Response does not contain candidates[]", responseBody);
+            return null;
+        }
+
+        StringBuilder text = new StringBuilder();
+        for (JsonNode candidate : candidates) {
+            JsonNode parts = candidate.path("content").path("parts");
+            if (!parts.isArray()) {
+                continue;
+            }
+            for (JsonNode part : parts) {
+                if (part.hasNonNull("text")) {
+                    if (!text.isEmpty()) {
+                        text.append('\n');
+                    }
+                    text.append(part.get("text").asText());
+                }
+            }
+        }
+
+        String aggregated = text.toString().trim();
+        if (aggregated.isBlank()) {
+            logFallback("vertex.response", "Response candidates did not include text parts", responseBody);
+        }
+        return aggregated.isBlank() ? null : aggregated;
+    }
+
+    private String normalizeVertexConfig(String value) {
+        if (value == null) {
+            return null;
+        }
+        String normalized = value.trim();
+        return normalized.isBlank() ? null : normalized;
+    }
+
+    private void logFallback(String flow, String reason, String details) {
+        LOGGER.info(
+                "AI fallback activated [flow={}, reason={}, details={}]",
+                flow,
+                reason,
+                abbreviateForLog(details)
+        );
+    }
+
+    private String abbreviateForLog(String value) {
+        if (value == null) {
+            return "n/a";
+        }
+        String normalized = value.replaceAll("\\s+", " ").trim();
+        if (normalized.length() <= 220) {
+            return normalized;
+        }
+        return normalized.substring(0, 217) + "...";
     }
 
     private String buildPrompt(String userMessage, List<AdvisorService.AdvisorRecommendationOption> advisors) {
@@ -245,16 +675,27 @@ public class AIService {
         return normalized.length() < 12 && words.length < 2;
     }
 
+    private boolean shouldAttemptGemini(String userMessage) {
+        if (userMessage == null) {
+            return false;
+        }
+
+        String normalized = userMessage.trim();
+        if (normalized.isBlank()) {
+            return false;
+        }
+
+        return normalized.matches(".*[\\p{L}\\p{N}].*");
+    }
+
     private String sanitizeMessage(String message) {
         return message == null ? "" : message
                 .replaceAll("(?im)^\\s*advisorId\\s*[:\\-]?.*$", "")
                 .trim();
     }
 
-    private FarmerContext resolveFarmerContext(AIRecommendationRequestDto request) {
-        String message = request == null || request.message() == null
-                ? null
-                : request.message().trim().replaceAll("\\s+", " ");
+    private FarmerContext resolveFarmerContext(String message) {
+        String normalizedMessage = normalizeMessage(message);
         String city = null;
         String country = null;
 
@@ -269,65 +710,17 @@ public class AIService {
             LOGGER.debug("No se pudo completar el contexto del agricultor desde el perfil autenticado");
         }
 
-        return new FarmerContext(message == null ? "" : message, city, country);
+        return new FarmerContext(normalizedMessage, city, country);
     }
 
-    private List<RankedAdvisorCandidate> buildRankedCandidates(FarmerContext farmerContext) {
-        Map<Long, LocalDate> nextAvailabilityByAdvisorId = availableDateRepository
-                .findByStatusAndScheduledDateGreaterThanEqualOrderByScheduledDateAscStartTimeAsc(
-                        AvailableDateStatus.AVAILABLE,
-                        LocalDate.now()
-                ).stream()
-                .collect(Collectors.toMap(
-                        availableDate -> availableDate.getAdvisor().getId(),
-                        availableDate -> availableDate.getScheduledDate(),
-                        (firstDate, ignored) -> firstDate,
-                        HashMap::new
-                ));
-
-        List<RankedAdvisorCandidate> deterministicCandidates = new ArrayList<>();
-        for (Profile profile : profileService.getAdvisorProfiles()) {
-            Advisor advisor = profileService.getAdvisorByUserId(profile.getUser().getId());
-            double locationScore = computeLocationScore(farmerContext, profile);
-            double ratingScore = computeRatingScore(advisor.getRating());
-            double experienceScore = computeExperienceScore(profile.getExperience());
-            double availabilityScore = computeAvailabilityScore(nextAvailabilityByAdvisorId.get(advisor.getId()));
-            double lexicalScore = computeLexicalScore(farmerContext.message(), profile);
-
-            deterministicCandidates.add(new RankedAdvisorCandidate(
-                    advisor,
-                    profile,
-                    nextAvailabilityByAdvisorId.get(advisor.getId()),
-                    locationScore + ratingScore + experienceScore + availabilityScore + lexicalScore,
-                    0.0,
-                    lexicalScore,
-                    locationScore,
-                    ratingScore,
-                    experienceScore,
-                    availabilityScore
-            ));
+    private String normalizeMessage(String message) {
+        if (message == null) {
+            return "";
         }
-
-        List<RankedAdvisorCandidate> topForSemantic = deterministicCandidates.stream()
-                .sorted(Comparator.comparingDouble(RankedAdvisorCandidate::finalScore).reversed())
-                .limit(SEMANTIC_CANDIDATE_LIMIT)
-                .toList();
-
-        Map<Long, Double> semanticScoresByAdvisorId = scoreSemanticSimilarity(farmerContext.message(), topForSemantic);
-
-        return deterministicCandidates.stream()
-                .map(candidate -> {
-                    double semanticScore = semanticScoresByAdvisorId.getOrDefault(candidate.advisor().getId(), 0.0);
-                    return candidate.withSemanticScore(semanticScore);
-                })
-                .sorted(Comparator.comparingDouble(RankedAdvisorCandidate::finalScore).reversed()
-                        .thenComparing(candidate -> candidate.advisor().getRating(), Comparator.nullsLast(Comparator.reverseOrder()))
-                        .thenComparing(candidate -> candidate.profile().getExperience(), Comparator.nullsLast(Comparator.reverseOrder()))
-                        .thenComparing(candidate -> candidate.nextAvailableDate(), Comparator.nullsLast(Comparator.naturalOrder())))
-                .toList();
+        return message.trim().replaceAll("\\s+", " ");
     }
 
-    private double computeLocationScore(FarmerContext farmerContext, Profile advisorProfile) {
+    private double computeLocationScore(FarmerContext farmerContext, AdvisorRecommendationProjection advisorProfile) {
         if (farmerContext.city() != null && advisorProfile.getCity() != null
                 && normalizeText(advisorProfile.getCity()).equals(farmerContext.city())) {
             return LOCATION_CITY_SCORE;
@@ -358,11 +751,11 @@ public class AIService {
         if (nextAvailableDate == null) {
             return 0.0;
         }
-        long daysUntil = ChronoUnit.DAYS.between(LocalDate.now(), nextAvailableDate);
+        long daysUntil = ChronoUnit.DAYS.between(LocalDate.now(clock), nextAvailableDate);
         return Math.max(3.0, MAX_AVAILABILITY_SCORE - Math.min(daysUntil, 12));
     }
 
-    private double computeLexicalScore(String userMessage, Profile profile) {
+    private double computeLexicalScore(String userMessage, String occupation, String description) {
         if (userMessage == null || userMessage.isBlank()) {
             return 0.0;
         }
@@ -372,9 +765,10 @@ public class AIService {
             return 0.0;
         }
 
-        Set<String> advisorTerms = tokenize(String.join(" ",
-                profile.getOccupation() == null ? "" : profile.getOccupation(),
-                profile.getDescription() == null ? "" : profile.getDescription()
+        Set<String> advisorTerms = tokenize(String.join(
+                " ",
+                occupation == null ? "" : occupation,
+                description == null ? "" : description
         ));
         if (advisorTerms.isEmpty()) {
             return 0.0;
@@ -388,15 +782,28 @@ public class AIService {
     }
 
     private Set<String> tokenize(String text) {
-        return Pattern.compile("[^\\p{L}\\p{N}]+")
+        return TOKEN_SPLITTER
                 .splitAsStream(normalizeText(text) == null ? "" : normalizeText(text))
                 .filter(token -> token.length() >= 4)
                 .collect(Collectors.toSet());
     }
 
-    private Map<Long, Double> scoreSemanticSimilarity(String userMessage, List<RankedAdvisorCandidate> candidates) {
-        if (client == null || userMessage == null || userMessage.isBlank() || candidates.isEmpty()) {
-            return Map.of();
+    private SemanticScoringResult scoreSemanticSimilarity(
+            String userMessage,
+            List<RankedAdvisorCandidate> candidates,
+            boolean shouldAttemptGemini
+    ) {
+        if (!shouldAttemptGemini) {
+            logFallback("recommendations.semantic", "Semantic scoring skipped because Gemini usage was disabled for this request", userMessage);
+            return new SemanticScoringResult(Map.of(), true);
+        }
+        if (userMessage == null || userMessage.isBlank()) {
+            logFallback("recommendations.semantic", "Semantic scoring skipped because the message is blank", userMessage);
+            return new SemanticScoringResult(Map.of(), true);
+        }
+        if (candidates.isEmpty()) {
+            logFallback("recommendations.semantic", "Semantic scoring skipped because there are no candidates", null);
+            return new SemanticScoringResult(Map.of(), true);
         }
 
         StringBuilder prompt = new StringBuilder("""
@@ -405,20 +812,22 @@ public class AIService {
                 {"scores":[{"advisorId":1,"semanticScore":0.0}]}
                 Usa semanticScore entre 0 y 8.
                 No expliques nada fuera del JSON.
-                
+
                 Consulta:
                 """).append(userMessage).append("\n\nAsesores:\n");
 
         for (RankedAdvisorCandidate candidate : candidates) {
-            prompt.append("- advisorId: ").append(candidate.advisor().getId())
-                    .append(", ocupacion: ").append(defaultText(candidate.profile().getOccupation()))
-                    .append(", descripcion: ").append(defaultText(candidate.profile().getDescription()))
+            prompt.append("- advisorId: ").append(candidate.advisorId())
+                    .append(", ocupacion: ").append(defaultText(candidate.occupation()))
+                    .append(", descripcion: ").append(defaultText(candidate.description()))
                     .append('\n');
         }
 
-        JsonNode node = parseJsonResponse(generateContent(prompt.toString()));
+        GeminiTextResult response = generateContent(prompt.toString(), "recommendations.semantic");
+        JsonNode node = parseJsonResponse(response.text());
         if (node == null || !node.has("scores") || !node.get("scores").isArray()) {
-            return Map.of();
+            logFallback("recommendations.semantic", "Gemini semantic response could not be parsed into scores[]", response.text());
+            return new SemanticScoringResult(Map.of(), true);
         }
 
         Map<Long, Double> scores = new HashMap<>();
@@ -430,7 +839,8 @@ public class AIService {
             double semanticScore = Math.max(0.0, Math.min(MAX_SEMANTIC_SCORE, scoreNode.get("semanticScore").asDouble()));
             scores.put(advisorId, semanticScore);
         }
-        return scores;
+
+        return new SemanticScoringResult(scores, response.usedFallback());
     }
 
     private AIRecommendationStatus determineStatus(String userMessage, List<RankedAdvisorCandidate> rankedCandidates) {
@@ -447,88 +857,154 @@ public class AIService {
         return gap >= READY_GAP_THRESHOLD ? AIRecommendationStatus.READY : AIRecommendationStatus.NEEDS_MORE_INFO;
     }
 
-    private AIRecommendationMatchDto toMatchDto(RankedAdvisorCandidate candidate, FarmerContext farmerContext) {
+    private AIRecommendationMatchDto toMatchDto(RankedAdvisorCandidate candidate) {
         return new AIRecommendationMatchDto(
-                candidate.advisor().getId(),
-                buildFullName(candidate.profile()),
-                candidate.profile().getOccupation(),
-                candidate.advisor().getRating(),
-                candidate.profile().getExperience(),
-                candidate.profile().getCity(),
-                candidate.profile().getCountry(),
+                candidate.advisorId(),
+                candidate.fullName(),
+                candidate.occupation(),
+                candidate.rating(),
+                candidate.experience(),
+                candidate.city(),
+                candidate.country(),
                 candidate.nextAvailableDate(),
-                buildWhy(candidate, farmerContext)
+                buildWhy(candidate)
         );
     }
 
-    private String buildWhy(RankedAdvisorCandidate candidate, FarmerContext farmerContext) {
+    private String buildWhy(RankedAdvisorCandidate candidate) {
         List<String> reasons = new ArrayList<>();
         if (candidate.locationScore() >= LOCATION_CITY_SCORE) {
             reasons.add("esta en tu misma ciudad");
         } else if (candidate.locationScore() >= LOCATION_COUNTRY_SCORE) {
-            reasons.add("atiende en tu mismo pais");
+            reasons.add("atiende en tu mismo país");
         }
         if (candidate.semanticScore() > 0 || candidate.lexicalScore() > 0) {
             reasons.add("su perfil se alinea con tu necesidad");
         }
-        if (candidate.advisor().getRating() != null) {
-            reasons.add("tiene una calificacion de " + candidate.advisor().getRating().setScale(1, RoundingMode.HALF_UP));
+        if (candidate.rating() != null) {
+            reasons.add("tiene una calificación de " + candidate.rating().setScale(1, RoundingMode.HALF_UP));
         }
-        if (candidate.profile().getExperience() != null && candidate.profile().getExperience() > 0) {
-            reasons.add(candidate.profile().getExperience() + " anos de experiencia");
+        if (candidate.experience() != null && candidate.experience() > 0) {
+            reasons.add(candidate.experience() + " años de experiencia");
         }
         if (candidate.nextAvailableDate() != null) {
-            reasons.add("tiene disponibilidad desde " + candidate.nextAvailableDate());
+            reasons.add("tiene disponibilidad desde el " + formatHumanDate(candidate.nextAvailableDate()));
         }
-        if (reasons.isEmpty() && farmerContext.message() != null && !farmerContext.message().isBlank()) {
-            reasons.add("puede orientarte segun lo que describiste");
+        if (reasons.isEmpty()) {
+            reasons.add("puede orientarte segpun lo que describiste");
         }
-        return String.join(", ", reasons) + ".";
+        return "Destaca porque " + joinReasons(reasons) + ".";
     }
 
-    private String buildSummary(FarmerContext farmerContext, List<RankedAdvisorCandidate> candidates, AIRecommendationStatus status) {
-        JsonNode node = parseJsonResponse(generateContent(buildNarrativePrompt(
-                farmerContext,
-                candidates,
-                status,
-                "Devuelve solo JSON valido con este formato: {\"summary\":\"texto\",\"clarifyingQuestion\":\"texto o null\",\"draftAppointmentMessage\":\"texto o null\"}."
-        )));
-        if (node != null && node.hasNonNull("summary")) {
-            return node.get("summary").asText();
+    private String joinReasons(List<String> reasons) {
+        if (reasons.isEmpty()) {
+            return "puede orientarte en este caso";
         }
-        RankedAdvisorCandidate firstCandidate = candidates.getFirst();
-        return switch (status) {
-            case READY -> "La mejor opcion es " + buildFullName(firstCandidate.profile()) + " por su cercania, experiencia y disponibilidad.";
-            case NEEDS_MORE_INFO -> "Te muestro las opciones mas cercanas, pero necesito un poco mas de detalle para recomendarte una sola.";
-            case UNAVAILABLE -> "No pude identificar una recomendacion util en este momento.";
-        };
+        if (reasons.size() == 1) {
+            return reasons.getFirst();
+        }
+        if (reasons.size() == 2) {
+            return reasons.get(0) + " y " + reasons.get(1);
+        }
+
+        StringBuilder builder = new StringBuilder();
+        for (int index = 0; index < reasons.size(); index++) {
+            if (index > 0) {
+                builder.append(index == reasons.size() - 1 ? " y " : ", ");
+            }
+            builder.append(reasons.get(index));
+        }
+        return builder.toString();
     }
 
-    private String buildClarifyingQuestion(FarmerContext farmerContext, List<RankedAdvisorCandidate> candidates) {
-        JsonNode node = parseJsonResponse(generateContent(buildNarrativePrompt(
+    private String formatHumanDate(LocalDate date) {
+        return date.format(HUMAN_DATE_FORMATTER);
+    }
+
+    private NarrativeContent buildNeedsMoreInfoNarrative(
+            FarmerContext farmerContext,
+            List<RankedAdvisorCandidate> candidates,
+            boolean shouldAttemptGemini
+    ) {
+        if (!shouldAttemptGemini) {
+            logFallback("recommendations.needs_more_info", "Clarifying narrative used deterministic fallback because Gemini was skipped", farmerContext.message());
+            return new NarrativeContent(
+                    "Te muestro las opciones mas cercanas, pero necesito un poco mas de detalle para recomendarte una sola.",
+                    "Que cultivo, problema específico o etapa del proceso agricola necesitas atender?",
+                    null,
+                    true
+            );
+        }
+
+        String prompt = buildNarrativePrompt(
                 farmerContext,
                 candidates,
                 AIRecommendationStatus.NEEDS_MORE_INFO,
-                "Devuelve solo JSON valido con este formato: {\"summary\":\"texto\",\"clarifyingQuestion\":\"texto o null\",\"draftAppointmentMessage\":null}."
-        )));
-        if (node != null && node.hasNonNull("clarifyingQuestion")) {
-            return node.get("clarifyingQuestion").asText();
+                "Devuelve solo JSON valido con este formato: {\"summary\":\"texto\",\"clarifyingQuestion\":\"texto\",\"draftAppointmentMessage\":null}."
+        );
+        GeminiTextResult response = generateContent(prompt, "recommendations.needs_more_info");
+        JsonNode node = parseJsonResponse(response.text());
+        if (node != null && node.hasNonNull("summary") && node.hasNonNull("clarifyingQuestion")) {
+            return new NarrativeContent(
+                    node.get("summary").asText(),
+                    node.get("clarifyingQuestion").asText(),
+                    null,
+                    response.usedFallback()
+            );
         }
-        return "Que cultivo, problema especifico o etapa del proceso agricola necesitas atender?";
+
+        logFallback("recommendations.needs_more_info", "Gemini clarifying response could not be parsed", response.text());
+        return new NarrativeContent(
+                "Te muestro las opciones mas cercanas, pero necesito un poco más de detalle para recomendarte una sola.",
+                "Que cultivo, problema específico o etapa del proceso agrícola necesitas atender?",
+                null,
+                true
+        );
     }
 
-    private String buildDraftAppointmentMessage(FarmerContext farmerContext, RankedAdvisorCandidate candidate) {
-        JsonNode node = parseJsonResponse(generateContent(buildNarrativePrompt(
+    private NarrativeContent buildReadyNarrative(
+            FarmerContext farmerContext,
+            RankedAdvisorCandidate bestCandidate,
+            List<RankedAdvisorCandidate> candidates,
+            boolean shouldAttemptGemini
+    ) {
+        if (!shouldAttemptGemini) {
+            logFallback("recommendations.ready", "Ready narrative used deterministic fallback because Gemini was skipped", farmerContext.message());
+            return buildForcedReadyNarrative(farmerContext, bestCandidate, candidates);
+        }
+
+        String prompt = buildNarrativePrompt(
                 farmerContext,
-                List.of(candidate),
+                candidates,
                 AIRecommendationStatus.READY,
                 "Devuelve solo JSON valido con este formato: {\"summary\":\"texto\",\"clarifyingQuestion\":null,\"draftAppointmentMessage\":\"texto\"}."
-        )));
-        if (node != null && node.hasNonNull("draftAppointmentMessage")) {
-            return node.get("draftAppointmentMessage").asText();
+        );
+        GeminiTextResult response = generateContent(prompt, "recommendations.ready");
+        JsonNode node = parseJsonResponse(response.text());
+        if (node != null && node.hasNonNull("summary") && node.hasNonNull("draftAppointmentMessage")) {
+            return new NarrativeContent(
+                    node.get("summary").asText(),
+                    null,
+                    node.get("draftAppointmentMessage").asText(),
+                    response.usedFallback()
+            );
         }
-        return "Hola " + buildFullName(candidate.profile()) + ", necesito asesoria sobre " + farmerContext.message() + ". "
-                + "Me gustaria coordinar una cita para revisar mi caso.";
+
+        logFallback("recommendations.ready", "Gemini ready response could not be parsed", response.text());
+        return buildForcedReadyNarrative(farmerContext, bestCandidate, candidates);
+    }
+
+    private NarrativeContent buildForcedReadyNarrative(
+            FarmerContext farmerContext,
+            RankedAdvisorCandidate bestCandidate,
+            List<RankedAdvisorCandidate> candidates
+    ) {
+        return new NarrativeContent(
+                buildSelectionSummary(bestCandidate),
+                null,
+                buildAppointmentContextMessage(bestCandidate.fullName(), defaultText(farmerContext.message())),
+                true
+        );
     }
 
     private String buildNarrativePrompt(
@@ -543,8 +1019,26 @@ public class AIService {
                 """);
         prompt.append(outputInstruction).append('\n')
                 .append("Estado: ").append(status.name()).append('\n')
-                .append("Consulta: ").append(farmerContext.message()).append('\n')
+                .append("Consulta: ").append(defaultText(farmerContext.message())).append('\n')
                 .append("Opciones:\n");
+
+        if (status == AIRecommendationStatus.READY) {
+            prompt.append("""
+                    Instrucciones para summary:
+                    - Resume por que se selecciono a este asesor.
+                    - No digas que la cita ya fue programada.
+                    - No anuncies una reunion confirmada.
+                    - Si no hubo una coincidencia perfecta, puedes decirlo brevemente, pero explica por que esta fue la mejor opcion disponible.
+                    Instrucciones para draftAppointmentMessage:
+                    - El mensaje se envia al asesor despues de que la cita ya fue programada.
+                    - No preguntes si la cita es posible.
+                    - No pidas coordinar, reservar ni agendar una cita.
+                    - Asume que la reunion sera virtual o en linea.
+                    - El mensaje debe describir la situacion del productor agropecuario y lo que quiere revisar durante la reunion.
+                    - Escribe el mensaje en primera persona, como si el productor agropecuario se lo escribiera directamente al asesor recomendado.
+                    - No hables del productor agropecuario en tercera persona.
+                    """);
+        }
 
         if (farmerContext.city() != null || farmerContext.country() != null) {
             prompt.append("Ubicacion: ")
@@ -556,10 +1050,10 @@ public class AIService {
 
         for (RankedAdvisorCandidate candidate : candidates) {
             prompt.append("- ")
-                    .append(buildFullName(candidate.profile()))
-                    .append(" | ocupacion: ").append(defaultText(candidate.profile().getOccupation()))
-                    .append(" | experiencia: ").append(candidate.profile().getExperience() == null ? 0 : candidate.profile().getExperience())
-                    .append(" | rating: ").append(candidate.advisor().getRating() == null ? "sin dato" : candidate.advisor().getRating())
+                    .append(candidate.fullName())
+                    .append(" | ocupacion: ").append(defaultText(candidate.occupation()))
+                    .append(" | experiencia: ").append(candidate.experience() == null ? 0 : candidate.experience())
+                    .append(" | rating: ").append(candidate.rating() == null ? "sin dato" : candidate.rating())
                     .append(" | disponible desde: ").append(candidate.nextAvailableDate() == null ? "sin fecha" : candidate.nextAvailableDate())
                     .append('\n');
         }
@@ -589,15 +1083,91 @@ public class AIService {
         }
     }
 
-    private String buildFullName(Profile profile) {
-        String firstName = profile.getFirstName() == null ? "" : profile.getFirstName().trim();
-        String lastName = profile.getLastName() == null ? "" : profile.getLastName().trim();
-        String fullName = (firstName + " " + lastName).trim();
-        return fullName.isBlank() ? "Asesor disponible" : fullName;
-    }
-
     private String defaultText(String value) {
         return value == null || value.isBlank() ? "No especificado" : value.trim();
+    }
+
+    private String normalizeAppointmentMessage(String draftAppointmentMessage) {
+        if (draftAppointmentMessage == null || draftAppointmentMessage.isBlank()) {
+            return draftAppointmentMessage;
+        }
+
+        String normalized = draftAppointmentMessage.trim().replaceAll("\\s+", " ");
+        normalized = normalized.replaceAll("(?i)me gustar[ií]a coordinar una cita para revisar mi caso\\.?\\s*", "");
+        normalized = normalized.replaceAll("(?i)quisiera coordinar una cita para revisar mi caso\\.?\\s*", "");
+        normalized = normalized.replaceAll("(?i)me gustar[ií]a agendar una cita\\.?\\s*", "");
+        normalized = normalized.replaceAll("(?i)quisiera agendar una cita\\.?\\s*", "");
+        normalized = normalized.replaceAll("(?i)podr[ií]amos coordinar una cita\\??\\s*", "");
+        normalized = normalized.replaceAll("(?i)es posible agendar una cita\\??\\s*", "");
+        normalized = normalized.replaceAll("(?i)^estimado asesor,?\\s*", "");
+        normalized = normalized.replaceAll("(?i)^el agricultor\\s+de\\s+[^.]+\\s+solicita una consulta sobre\\s*", "Quiero revisar ");
+        normalized = normalized.replaceAll("(?i)^el agricultor\\s+solicita una consulta sobre\\s*", "Quiero revisar ");
+        normalized = normalized.replaceAll("(?i)\\bdesea revisar\\b", "quiero revisar");
+        normalized = normalized.replaceAll("(?i)^solicita una consulta sobre\\s*", "Quiero revisar ");
+
+        if (!normalized.toLowerCase(Locale.ROOT).contains("reunion virtual")
+                && !normalized.toLowerCase(Locale.ROOT).contains("reunion en linea")
+                && !normalized.toLowerCase(Locale.ROOT).contains("reunión virtual")
+                && !normalized.toLowerCase(Locale.ROOT).contains("reunión en línea")) {
+            normalized = normalized + " Esto resume el contexto que quiero revisar en nuestra reunion virtual.";
+        }
+
+        return normalized.trim();
+    }
+
+    private String normalizeRecommendationSummary(String summary, RankedAdvisorCandidate bestCandidate) {
+        if (summary == null || summary.isBlank()) {
+            return buildSelectionSummary(bestCandidate);
+        }
+
+        String normalized = summary.trim().replaceAll("\\s+", " ");
+        String lower = normalized.toLowerCase(Locale.ROOT);
+        if (lower.contains("hemos programado")
+                || lower.contains("reunion virtual")
+                || lower.contains("reunión virtual")
+                || lower.contains("reunion en linea")
+                || lower.contains("reunión en línea")
+                || lower.contains("cita programada")
+                || lower.contains("cita agendada")) {
+            return buildSelectionSummary(bestCandidate);
+        }
+        return normalized;
+    }
+
+    private String buildSelectionSummary(RankedAdvisorCandidate bestCandidate) {
+        List<String> reasons = new ArrayList<>();
+        if (bestCandidate.locationScore() >= LOCATION_CITY_SCORE) {
+            reasons.add("coincide con tu ciudad");
+        } else if (bestCandidate.locationScore() >= LOCATION_COUNTRY_SCORE) {
+            reasons.add("atiende en tu mismo pais");
+        }
+        if (bestCandidate.semanticScore() > 0 || bestCandidate.lexicalScore() > 0) {
+            reasons.add("su perfil se alinea con tu necesidad");
+        }
+        if (bestCandidate.rating() != null) {
+            reasons.add("tiene una calificacion de " + bestCandidate.rating().setScale(1, RoundingMode.HALF_UP));
+        }
+        if (bestCandidate.experience() != null && bestCandidate.experience() > 0) {
+            reasons.add("aporta " + bestCandidate.experience() + " anos de experiencia");
+        }
+        if (bestCandidate.nextAvailableDate() != null) {
+            reasons.add("cuenta con disponibilidad desde el " + formatHumanDate(bestCandidate.nextAvailableDate()));
+        }
+
+        if (reasons.isEmpty()) {
+            return "Se selecciono a " + bestCandidate.fullName() + " porque fue la opcion mas consistente entre los asesores disponibles.";
+        }
+        if (bestCandidate.semanticScore() > 0 || bestCandidate.lexicalScore() > 0 || bestCandidate.locationScore() > 0) {
+            return "Se selecciono a " + bestCandidate.fullName() + " porque " + joinReasons(reasons) + ".";
+        }
+        return "No hubo una coincidencia perfecta, pero se selecciono a " + bestCandidate.fullName() + " porque " + joinReasons(reasons) + ".";
+    }
+
+    private String buildAppointmentContextMessage(String advisorName, String situation) {
+        return "Hola " + advisorName
+                + ", quiero compartir el contexto de mi caso para nuestra reunion virtual. "
+                + "Necesito asesoria sobre " + situation
+                + " y quiero revisar contigo las posibles causas, el manejo recomendado y los siguientes pasos.";
     }
 
     private String normalizeText(String value) {
@@ -608,16 +1178,47 @@ public class AIService {
         return normalized.isBlank() ? null : normalized.toLowerCase(Locale.ROOT);
     }
 
+    private String normalizeConversationId(String conversationId) {
+        if (conversationId == null) {
+            return null;
+        }
+        String normalized = conversationId.trim();
+        return normalized.isBlank() ? null : normalized;
+    }
+
+    private String mergeMessages(String originalMessage, String clarificationMessage) {
+        LinkedHashSet<String> parts = new LinkedHashSet<>();
+        if (originalMessage != null && !originalMessage.isBlank()) {
+            parts.add(originalMessage.trim());
+        }
+        if (clarificationMessage != null && !clarificationMessage.isBlank()) {
+            parts.add(clarificationMessage.trim());
+        }
+        return String.join(". ", parts);
+    }
+
     private record FarmerContext(
             String message,
             String city,
             String country
     ) {
+        private FarmerContext withMessage(String updatedMessage) {
+            return new FarmerContext(updatedMessage, city, country);
+        }
     }
 
     private record RankedAdvisorCandidate(
-            Advisor advisor,
-            Profile profile,
+            Long advisorId,
+            Long userId,
+            BigDecimal rating,
+            String firstName,
+            String lastName,
+            String city,
+            String country,
+            String description,
+            String photo,
+            String occupation,
+            Integer experience,
             LocalDate nextAvailableDate,
             double baseScore,
             double semanticScore,
@@ -633,8 +1234,17 @@ public class AIService {
 
         private RankedAdvisorCandidate withSemanticScore(double updatedSemanticScore) {
             return new RankedAdvisorCandidate(
-                    advisor,
-                    profile,
+                    advisorId,
+                    userId,
+                    rating,
+                    firstName,
+                    lastName,
+                    city,
+                    country,
+                    description,
+                    photo,
+                    occupation,
+                    experience,
                     nextAvailableDate,
                     baseScore,
                     updatedSemanticScore,
@@ -645,5 +1255,65 @@ public class AIService {
                     availabilityScore
             );
         }
+
+        private String fullName() {
+            String fullName = ((firstName == null ? "" : firstName.trim()) + " " + (lastName == null ? "" : lastName.trim())).trim();
+            return fullName.isBlank() ? "Asesor disponible" : fullName;
+        }
+    }
+
+    private record RecommendationSession(
+            String conversationId,
+            FarmerContext farmerContext,
+            List<RankedAdvisorCandidate> candidates,
+            int questionsAsked,
+            boolean fallbackMode,
+            Instant expiresAt
+    ) {
+    }
+
+    private record RankingResult(
+            List<RankedAdvisorCandidate> candidates,
+            boolean usedFallback
+    ) {
+    }
+
+    private record SemanticScoringResult(
+            Map<Long, Double> scores,
+            boolean usedFallback
+    ) {
+    }
+
+    private record NarrativeContent(
+            String summary,
+            String clarifyingQuestion,
+            String draftAppointmentMessage,
+            boolean usedFallback
+    ) {
+    }
+
+    private enum GeminiFailureType {
+        RATE_LIMIT,
+        UNAVAILABLE,
+        OTHER
+    }
+
+    private record GeminiTextResult(
+            String text,
+            boolean usedFallback,
+            GeminiFailureType failureType
+    ) {
+        private static GeminiTextResult success(String text) {
+            return new GeminiTextResult(text, false, null);
+        }
+
+        private static GeminiTextResult failure(GeminiFailureType failureType) {
+            return new GeminiTextResult(null, true, failureType);
+        }
+    }
+
+    @FunctionalInterface
+    interface GeminiGateway {
+        String generate(String prompt) throws Exception;
     }
 }

@@ -2,137 +2,205 @@ package com.agrotech.api.ai.application.usecase;
 
 import com.agrotech.api.ai.infrastructure.web.dto.AIRecommendationRequestDto;
 import com.agrotech.api.ai.infrastructure.web.dto.AIRecommendationStatus;
-import com.agrotech.api.appointment.domain.model.AvailableDate;
-import com.agrotech.api.appointment.domain.valueobject.AvailableDateStatus;
-import com.agrotech.api.appointment.infrastructure.persistence.jpa.repository.AvailableDateRepository;
 import com.agrotech.api.iam.application.usecase.AuthenticatedUserService;
 import com.agrotech.api.iam.domain.model.AuthenticatedUser;
 import com.agrotech.api.iam.domain.model.User;
 import com.agrotech.api.iam.domain.valueobject.UserRole;
 import com.agrotech.api.profile.application.usecase.ProfileService;
-import com.agrotech.api.profile.domain.model.Advisor;
 import com.agrotech.api.profile.domain.model.Profile;
+import com.agrotech.api.profile.infrastructure.persistence.jpa.projection.AdvisorRecommendationProjection;
+import com.agrotech.api.profile.infrastructure.persistence.jpa.repository.AdvisorRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class AIServiceTest {
-    private final AvailableDateRepository availableDateRepository = mock(AvailableDateRepository.class);
+    private static final Instant BASE_INSTANT = Instant.parse("2026-05-12T10:00:00Z");
+    private static final LocalDate TODAY = LocalDate.of(2026, 5, 12);
+
+    private final AdvisorRepository advisorRepository = mock(AdvisorRepository.class);
     private final ProfileService profileService = mock(ProfileService.class);
     private final AuthenticatedUserService authenticatedUserService = mock(AuthenticatedUserService.class);
 
-    private AIService aiService;
+    private MutableClock clock;
 
     @BeforeEach
     void setUp() {
-        aiService = new AIService(
-                availableDateRepository,
-                profileService,
-                authenticatedUserService,
-                new ObjectMapper()
-        );
+        clock = new MutableClock(BASE_INSTANT, ZoneOffset.UTC);
     }
 
     @Test
-    void recommendAdvisorsReturnsReadyWithDeterministicFallback() {
-        Profile farmerProfile = profile(10L, 100L, "Lucia", "Quispe", "Cusco", "Peru", null, null, 0);
-        when(authenticatedUserService.getCurrentUser()).thenReturn(
-                new AuthenticatedUser(100L, 10L, "farmer@test.com", UserRole.FARMER, 50L, null)
-        );
-        when(profileService.getCurrentProfile()).thenReturn(farmerProfile);
-
-        Profile bestProfile = profile(20L, 200L, "Ana", "Lopez", "Cusco", "Peru", "Suelos", "Especialista en fertilizacion y suelos", 8);
-        Profile secondProfile = profile(21L, 201L, "Bruno", "Rojas", "Lima", "Peru", "Riego", "Asesor en riego tecnificado", 4);
-        Advisor bestAdvisor = advisor(1L, 200L, "4.80");
-        Advisor secondAdvisor = advisor(2L, 201L, "4.10");
-
-        when(profileService.getAdvisorProfiles()).thenReturn(List.of(bestProfile, secondProfile));
-        when(profileService.getAdvisorByUserId(200L)).thenReturn(bestAdvisor);
-        when(profileService.getAdvisorByUserId(201L)).thenReturn(secondAdvisor);
-        when(availableDateRepository.findByStatusAndScheduledDateGreaterThanEqualOrderByScheduledDateAscStartTimeAsc(
-                AvailableDateStatus.AVAILABLE,
-                LocalDate.now()
-        )).thenReturn(List.of(
-                availableDate(1L, bestAdvisor, LocalDate.now().plusDays(1), "09:00", "10:00"),
-                availableDate(2L, secondAdvisor, LocalDate.now().plusDays(3), "11:00", "12:00")
-        ));
+    void recommendAdvisorsReturnsReadyWithSessionMetadataAndFallback() {
+        AIService aiService = createService(null);
+        mockFarmerProfile();
+        when(advisorRepository.findRecommendationInputs(eq(com.agrotech.api.appointment.domain.valueobject.AvailableDateStatus.AVAILABLE), eq(TODAY)))
+                .thenReturn(List.of(
+                        projection(1L, 200L, "Ana", "Lopez", "Cusco", "Peru", "Suelos", "Especialista en fertilizacion y suelos", 8, "4.80", TODAY.plusDays(1)),
+                        projection(2L, 201L, "Bruno", "Rojas", "Lima", "Peru", "Riego", "Asesor en riego tecnificado", 4, "4.10", TODAY.plusDays(3))
+                ));
 
         var response = aiService.recommendAdvisors(new AIRecommendationRequestDto(
-                "Necesito ayuda con la fertilizacion del suelo de mi cultivo"
+                "Necesito ayuda con la fertilizacion del suelo de mi cultivo",
+                null
         ));
 
         assertEquals(AIRecommendationStatus.READY, response.status());
         assertEquals(1L, response.selectedAdvisorId());
         assertEquals(2, response.matches().size());
-        assertTrue(response.matches().getFirst().why().contains("misma ciudad"));
+        assertNull(response.conversationId());
+        assertEquals(0, response.questionsAsked());
+        assertEquals(1, response.maxQuestions());
+        assertTrue(response.usedFallback());
         assertNotNull(response.draftAppointmentMessage());
-        assertTrue(response.draftAppointmentMessage().contains("fertilizacion del suelo"));
     }
 
     @Test
-    void recommendAdvisorsReturnsNeedsMoreInfoForVagueRequest() {
-        Profile farmerProfile = profile(10L, 100L, "Lucia", "Quispe", "Cusco", "Peru", null, null, 0);
-        when(authenticatedUserService.getCurrentUser()).thenReturn(
-                new AuthenticatedUser(100L, 10L, "farmer@test.com", UserRole.FARMER, 50L, null)
-        );
-        when(profileService.getCurrentProfile()).thenReturn(farmerProfile);
+    void recommendAdvisorsUsesSingleClarificationAndCachedShortlist() {
+        AIService aiService = createService(null);
+        mockFarmerProfile();
+        when(advisorRepository.findRecommendationInputs(eq(com.agrotech.api.appointment.domain.valueobject.AvailableDateStatus.AVAILABLE), eq(TODAY)))
+                .thenReturn(List.of(
+                        projection(1L, 200L, "Ana", "Lopez", "Cusco", "Peru", "Suelos", "Especialista agricola integral", 6, "4.60", TODAY.plusDays(2)),
+                        projection(2L, 201L, "Bruno", "Rojas", "Cusco", "Peru", "Cultivos", "Especialista agricola integral", 6, "4.50", TODAY.plusDays(3))
+                ));
 
-        Profile profile = profile(20L, 200L, "Ana", "Lopez", "Cusco", "Peru", "Suelos", "Especialista en fertilizacion y suelos", 8);
-        Advisor advisor = advisor(1L, 200L, "4.80");
+        var firstResponse = aiService.recommendAdvisors(new AIRecommendationRequestDto("ayuda", null));
 
-        when(profileService.getAdvisorProfiles()).thenReturn(List.of(profile));
-        when(profileService.getAdvisorByUserId(200L)).thenReturn(advisor);
-        when(availableDateRepository.findByStatusAndScheduledDateGreaterThanEqualOrderByScheduledDateAscStartTimeAsc(
-                AvailableDateStatus.AVAILABLE,
-                LocalDate.now()
-        )).thenReturn(List.of(
-                availableDate(1L, advisor, LocalDate.now().plusDays(1), "09:00", "10:00")
+        assertEquals(AIRecommendationStatus.NEEDS_MORE_INFO, firstResponse.status());
+        assertNotNull(firstResponse.conversationId());
+        assertEquals(1, firstResponse.questionsAsked());
+        assertTrue(firstResponse.usedFallback());
+        assertNull(firstResponse.selectedAdvisorId());
+
+        var secondResponse = aiService.recommendAdvisors(new AIRecommendationRequestDto(
+                "Es para mejorar el manejo de mi cultivo",
+                firstResponse.conversationId()
         ));
 
-        var response = aiService.recommendAdvisors(new AIRecommendationRequestDto("ayuda"));
+        assertEquals(AIRecommendationStatus.READY, secondResponse.status());
+        assertEquals(firstResponse.conversationId(), secondResponse.conversationId());
+        assertEquals(1L, secondResponse.selectedAdvisorId());
+        assertEquals(1, secondResponse.questionsAsked());
+        assertTrue(secondResponse.usedFallback());
 
-        assertEquals(AIRecommendationStatus.NEEDS_MORE_INFO, response.status());
-        assertNull(response.selectedAdvisorId());
-        assertNotNull(response.clarifyingQuestion());
-        assertEquals(1, response.matches().size());
+        verify(advisorRepository, times(1)).findRecommendationInputs(eq(com.agrotech.api.appointment.domain.valueobject.AvailableDateStatus.AVAILABLE), eq(TODAY));
     }
 
     @Test
-    void recommendAdvisorsReturnsUnavailableWhenNoAdvisorsExist() {
+    void recommendAdvisorsExpiredConversationStartsFreshSession() {
+        AIService aiService = createService(null);
+        mockFarmerProfile();
+        when(advisorRepository.findRecommendationInputs(eq(com.agrotech.api.appointment.domain.valueobject.AvailableDateStatus.AVAILABLE), eq(TODAY)))
+                .thenReturn(List.of(
+                        projection(1L, 200L, "Ana", "Lopez", "Cusco", "Peru", "Suelos", "Especialista agricola integral", 6, "4.60", TODAY.plusDays(2)),
+                        projection(2L, 201L, "Bruno", "Rojas", "Cusco", "Peru", "Cultivos", "Especialista agricola integral", 6, "4.50", TODAY.plusDays(3))
+                ));
+
+        var firstResponse = aiService.recommendAdvisors(new AIRecommendationRequestDto("ayuda", null));
+        clock.advance(Duration.ofMinutes(16));
+
+        var secondResponse = aiService.recommendAdvisors(new AIRecommendationRequestDto(
+                "ayuda",
+                firstResponse.conversationId()
+        ));
+
+        assertEquals(AIRecommendationStatus.NEEDS_MORE_INFO, secondResponse.status());
+        assertNotNull(secondResponse.conversationId());
+        assertNotEquals(firstResponse.conversationId(), secondResponse.conversationId());
+        verify(advisorRepository, times(2)).findRecommendationInputs(eq(com.agrotech.api.appointment.domain.valueobject.AvailableDateStatus.AVAILABLE), eq(TODAY));
+    }
+
+    @Test
+    void recommendAdvisorsGeminiRateLimitReturnsDeterministicFallback() {
+        AIService aiService = createService(prompt -> {
+            throw new RuntimeException("429 quota exceeded");
+        });
+        mockFarmerProfile();
+        when(advisorRepository.findRecommendationInputs(eq(com.agrotech.api.appointment.domain.valueobject.AvailableDateStatus.AVAILABLE), eq(TODAY)))
+                .thenReturn(List.of(
+                        projection(1L, 200L, "Ana", "Lopez", "Cusco", "Peru", "Suelos", "Especialista en fertilizacion y suelos", 8, "4.80", TODAY.plusDays(1)),
+                        projection(2L, 201L, "Bruno", "Rojas", "Lima", "Peru", "Riego", "Asesor en riego tecnificado", 4, "4.10", TODAY.plusDays(3))
+                ));
+
+        var response = aiService.recommendAdvisors(new AIRecommendationRequestDto(
+                "Necesito ayuda con la fertilizacion del suelo de mi cultivo",
+                null
+        ));
+
+        assertEquals(AIRecommendationStatus.READY, response.status());
+        assertEquals(1L, response.selectedAdvisorId());
+        assertTrue(response.usedFallback());
+        assertNotNull(response.summary());
+        assertNotNull(response.draftAppointmentMessage());
+    }
+
+    @Test
+    void recommendAdvisorsUnknownConversationStartsFreshSession() {
+        AIService aiService = createService(null);
+        mockFarmerProfile();
+        when(advisorRepository.findRecommendationInputs(eq(com.agrotech.api.appointment.domain.valueobject.AvailableDateStatus.AVAILABLE), eq(TODAY)))
+                .thenReturn(List.of(
+                        projection(1L, 200L, "Ana", "Lopez", "Cusco", "Peru", "Suelos", "Especialista agricola integral", 6, "4.60", TODAY.plusDays(2))
+                ));
+
+        var response = aiService.recommendAdvisors(new AIRecommendationRequestDto(
+                "Necesito apoyo con mis cultivos",
+                "missing-session"
+        ));
+
+        assertEquals(AIRecommendationStatus.READY, response.status());
+        verify(advisorRepository, times(1)).findRecommendationInputs(eq(com.agrotech.api.appointment.domain.valueobject.AvailableDateStatus.AVAILABLE), eq(TODAY));
+    }
+
+    private AIService createService(AIService.GeminiGateway geminiGateway) {
+        return new AIService(
+                advisorRepository,
+                profileService,
+                authenticatedUserService,
+                new ObjectMapper(),
+                clock,
+                Duration.ofMinutes(15),
+                geminiGateway
+        );
+    }
+
+    private void mockFarmerProfile() {
         when(authenticatedUserService.getCurrentUser()).thenReturn(
                 new AuthenticatedUser(100L, 10L, "farmer@test.com", UserRole.FARMER, 50L, null)
         );
         when(profileService.getCurrentProfile()).thenReturn(
-                profile(10L, 100L, "Lucia", "Quispe", "Cusco", "Peru", null, null, 0)
+                Profile.builder()
+                        .id(10L)
+                        .user(User.builder().id(100L).username("farmer@test.com").password("secret").role(UserRole.FARMER).build())
+                        .firstName("Lucia")
+                        .lastName("Quispe")
+                        .city("Cusco")
+                        .country("Peru")
+                        .build()
         );
-        when(profileService.getAdvisorProfiles()).thenReturn(List.of());
-        when(availableDateRepository.findByStatusAndScheduledDateGreaterThanEqualOrderByScheduledDateAscStartTimeAsc(
-                AvailableDateStatus.AVAILABLE,
-                LocalDate.now()
-        )).thenReturn(List.of());
-
-        var response = aiService.recommendAdvisors(new AIRecommendationRequestDto(
-                "Necesito orientacion para mis cultivos"
-        ));
-
-        assertEquals(AIRecommendationStatus.UNAVAILABLE, response.status());
-        assertNull(response.selectedAdvisorId());
-        assertTrue(response.matches().isEmpty());
     }
 
-    private Profile profile(
-            Long profileId,
+    private AdvisorRecommendationProjection projection(
+            Long advisorId,
             Long userId,
             String firstName,
             String lastName,
@@ -140,37 +208,99 @@ class AIServiceTest {
             String country,
             String occupation,
             String description,
-            int experience
+            Integer experience,
+            String rating,
+            LocalDate nextAvailableDate
     ) {
-        return Profile.builder()
-                .id(profileId)
-                .user(User.builder().id(userId).username("user" + userId + "@test.com").password("secret").role(UserRole.ADVISOR).build())
-                .firstName(firstName)
-                .lastName(lastName)
-                .city(city)
-                .country(country)
-                .occupation(occupation)
-                .description(description)
-                .experience(experience)
-                .build();
+        return new AdvisorRecommendationProjection() {
+            @Override
+            public Long getAdvisorId() {
+                return advisorId;
+            }
+
+            @Override
+            public Long getUserId() {
+                return userId;
+            }
+
+            @Override
+            public BigDecimal getRating() {
+                return new BigDecimal(rating);
+            }
+
+            @Override
+            public String getFirstName() {
+                return firstName;
+            }
+
+            @Override
+            public String getLastName() {
+                return lastName;
+            }
+
+            @Override
+            public String getCity() {
+                return city;
+            }
+
+            @Override
+            public String getCountry() {
+                return country;
+            }
+
+            @Override
+            public String getDescription() {
+                return description;
+            }
+
+            @Override
+            public String getPhoto() {
+                return null;
+            }
+
+            @Override
+            public String getOccupation() {
+                return occupation;
+            }
+
+            @Override
+            public Integer getExperience() {
+                return experience;
+            }
+
+            @Override
+            public LocalDate getNextAvailableDate() {
+                return nextAvailableDate;
+            }
+        };
     }
 
-    private Advisor advisor(Long advisorId, Long userId, String rating) {
-        return Advisor.builder()
-                .id(advisorId)
-                .user(User.builder().id(userId).username("advisor" + userId + "@test.com").password("secret").role(UserRole.ADVISOR).build())
-                .rating(new BigDecimal(rating))
-                .build();
-    }
+    private static final class MutableClock extends Clock {
+        private Instant instant;
+        private final ZoneOffset zoneOffset;
 
-    private AvailableDate availableDate(Long id, Advisor advisor, LocalDate date, String startTime, String endTime) {
-        return AvailableDate.builder()
-                .id(id)
-                .advisor(advisor)
-                .scheduledDate(date)
-                .startTime(startTime)
-                .endTime(endTime)
-                .status(AvailableDateStatus.AVAILABLE)
-                .build();
+        private MutableClock(Instant instant, ZoneOffset zoneOffset) {
+            this.instant = instant;
+            this.zoneOffset = zoneOffset;
+        }
+
+        @Override
+        public ZoneOffset getZone() {
+            return zoneOffset;
+        }
+
+        @Override
+        public Clock withZone(java.time.ZoneId zone) {
+            return Clock.fixed(instant, zone);
+        }
+
+        @Override
+        public Instant instant() {
+            return instant;
+        }
+
+        private void advance(Duration duration) {
+            instant = instant.plus(duration);
+        }
     }
 }

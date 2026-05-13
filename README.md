@@ -9,7 +9,7 @@ Spring Boot backend for the Agrotech platform. It provides authentication, profi
 - Spring Data JPA
 - MySQL
 - Google Cloud Storage for uploaded media
-- Gemini API for AI chat and structured advisor recommendations
+- Vertex AI Gemini for AI chat and structured advisor recommendations
 
 ## Main behavior
 - Base API path: `/api/v1`
@@ -32,15 +32,17 @@ MYSQL_DATABASE=agrotech
 MYSQL_USER=root
 MYSQL_PASSWORD=secret
 JWT_SECRET=change-me
-GEMINI_API_KEY=your_gemini_api_key
 GCS_BUCKET_NAME=your_gcs_bucket_name
 GCS_PROJECT_ID=your_gcs_project_id
+VERTEX_AI_PROJECT_ID=your_vertex_project_id
+VERTEX_AI_LOCATION=global
+VERTEX_AI_MODEL_ID=gemini-2.5-flash-preview-09-2025
 ```
 
 ## Local development
 1. Start a MySQL database.
 2. Create the database configured in `MYSQL_DATABASE`.
-3. Authenticate Google Cloud Application Default Credentials if you want uploads to work:
+3. Authenticate Google Cloud Application Default Credentials if you want uploads and AI requests to work:
 
 ```bash
 gcloud auth application-default login

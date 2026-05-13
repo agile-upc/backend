@@ -399,17 +399,45 @@ Response body:
 Returned by:
 - `POST /api/v1/ai/recommendations`
 
-Request body:
+Purpose:
+- Recommend up to 3 advisors for the authenticated farmer
+- Return a direct recommendation when the backend has enough confidence
+- Ask at most 1 clarification question when the initial request is too vague
+- Degrade gracefully if Gemini is unavailable or rate-limited
+
+Authentication:
+- Requires `Authorization: Bearer <token>`
+- Intended for authenticated users with farmer context
+
+How to use it:
+1. Send the farmer's first message in `message`
+2. Set `conversationId` to `null` or omit it on the first turn
+3. Inspect `status`
+4. If `status = READY`, use `selectedAdvisorId`, `matches`, and optionally `draftAppointmentMessage`
+5. If `status = NEEDS_MORE_INFO`, show `clarifyingQuestion` to the user and send the next reply back with the returned `conversationId`
+6. If `status = UNAVAILABLE`, show the summary and let the user try again later or reformulate the request
+
+First-turn request:
 
 ```json
 {
-  "message": "Necesito ayuda con la fertilizacion del suelo"
+  "message": "Necesito ayuda con la fertilizacion del suelo",
+  "conversationId": null
 }
 ```
 
 The backend uses the authenticated farmer profile location when available. If the profile does not have `city` or `country`, location is simply ignored in the ranking score.
 
-Response body:
+Request fields:
+- `message`: free-text farmer request
+- `conversationId`: `null` on the first turn, or the value returned by a previous `NEEDS_MORE_INFO` response
+
+Guidance for `message`:
+- Better requests include the crop, problem, goal, or production stage
+- Very short or vague requests such as `"ayuda"` may trigger `NEEDS_MORE_INFO`
+- The endpoint still returns ranked matches even when it asks a clarification question
+
+Example response when the backend is ready to recommend immediately:
 
 ```json
 {
@@ -430,16 +458,122 @@ Response body:
   ],
   "summary": "La mejor opcion es Ana Lopez por su cercania, experiencia y disponibilidad.",
   "clarifyingQuestion": null,
-  "draftAppointmentMessage": "Hola Ana Lopez, necesito asesoria sobre la fertilizacion del suelo de mi cultivo. Me gustaria coordinar una cita para revisar mi caso."
+  "draftAppointmentMessage": "Hola Ana Lopez, necesito asesoria sobre la fertilizacion del suelo de mi cultivo. Me gustaria coordinar una cita para revisar mi caso.",
+  "conversationId": null,
+  "questionsAsked": 0,
+  "maxQuestions": 1,
+  "usedFallback": false
 }
 ```
 
-Rules:
+Example response when more detail is needed:
+
+```json
+{
+  "status": "NEEDS_MORE_INFO",
+  "selectedAdvisorId": null,
+  "matches": [
+    {
+      "advisorId": 2,
+      "fullName": "Ana Lopez",
+      "occupation": "Soil specialist",
+      "rating": 4.8,
+      "experience": 5,
+      "city": "Cusco",
+      "country": "Peru",
+      "nextAvailableDate": "2026-05-14",
+      "why": "esta en tu misma ciudad, tiene una calificacion de 4.8, 5 anos de experiencia, tiene disponibilidad desde 2026-05-14."
+    },
+    {
+      "advisorId": 5,
+      "fullName": "Bruno Rojas",
+      "occupation": "Crop advisor",
+      "rating": 4.7,
+      "experience": 6,
+      "city": "Cusco",
+      "country": "Peru",
+      "nextAvailableDate": "2026-05-15",
+      "why": "esta en tu misma ciudad, tiene una calificacion de 4.7, 6 anos de experiencia, tiene disponibilidad desde 2026-05-15."
+    }
+  ],
+  "summary": "Te muestro las opciones mas cercanas, pero necesito un poco mas de detalle para recomendarte una sola.",
+  "clarifyingQuestion": "Que cultivo, problema especifico o etapa del proceso agricola necesitas atender?",
+  "draftAppointmentMessage": null,
+  "conversationId": "9c0ee4bb-a4ee-47f9-8f7e-6c1d2c5b1024",
+  "questionsAsked": 1,
+  "maxQuestions": 1,
+  "usedFallback": true
+}
+```
+
+Second-turn clarification request:
+
+```json
+{
+  "message": "Es para maiz y tengo problemas con la calidad del suelo",
+  "conversationId": "9c0ee4bb-a4ee-47f9-8f7e-6c1d2c5b1024"
+}
+```
+
+Example second-turn response:
+
+```json
+{
+  "status": "READY",
+  "selectedAdvisorId": 2,
+  "matches": [
+    {
+      "advisorId": 2,
+      "fullName": "Ana Lopez",
+      "occupation": "Soil specialist",
+      "rating": 4.8,
+      "experience": 5,
+      "city": "Cusco",
+      "country": "Peru",
+      "nextAvailableDate": "2026-05-14",
+      "why": "esta en tu misma ciudad, su perfil se alinea con tu necesidad, tiene una calificacion de 4.8, 5 anos de experiencia, tiene disponibilidad desde 2026-05-14."
+    }
+  ],
+  "summary": "La mejor opcion es Ana Lopez por su cercania, experiencia y disponibilidad dentro del shortlist evaluado.",
+  "clarifyingQuestion": null,
+  "draftAppointmentMessage": "Hola Ana Lopez, necesito asesoria sobre Necesito ayuda con la fertilizacion del suelo. Es para maiz y tengo problemas con la calidad del suelo. Me gustaria coordinar una cita para revisar mi caso.",
+  "conversationId": "9c0ee4bb-a4ee-47f9-8f7e-6c1d2c5b1024",
+  "questionsAsked": 1,
+  "maxQuestions": 1,
+  "usedFallback": true
+}
+```
+
+Clarification flow rules:
+- The backend allows at most 1 clarification question
+- On the next request with the same valid `conversationId`, the backend must return `READY` or `UNAVAILABLE`; it will not ask another question
+- The recommendation shortlist is cached server-side for 15 minutes
+- If `conversationId` is unknown or expired, the backend starts a fresh session
+- The second turn reuses the cached shortlist and does not rebuild advisor candidates from the database for that session
+
+Response field rules:
 - `status` is `READY`, `NEEDS_MORE_INFO`, or `UNAVAILABLE`
 - `selectedAdvisorId` is only present when the service has enough confidence to recommend one advisor directly
 - `matches` contains up to 3 ranked advisors
+- `summary` is the main text the client should display for the result
 - `clarifyingQuestion` is used when the request needs more detail
 - `draftAppointmentMessage` is only intended for the booking flow
+- `conversationId` is returned when the flow enters a clarification session and must be sent back on the next turn
+- `questionsAsked` tracks how many clarification questions have already been used
+- `maxQuestions` is currently always `1`
+- `usedFallback` is `true` when Gemini was skipped or the backend degraded to deterministic templated output
+
+How clients should interpret `usedFallback`:
+- `false` means Gemini-assisted phrasing/scoring was available
+- `true` means the endpoint still worked, but the final text and/or ranking flow fell back to deterministic backend logic
+- Clients should not treat `usedFallback = true` as an error
+
+Recommended client behavior:
+- Always render `matches`, even if `status = NEEDS_MORE_INFO`
+- Persist `conversationId` only for the active clarification flow
+- Clear the stored `conversationId` after a final `READY` or `UNAVAILABLE` response
+- If the backend returns `NEEDS_MORE_INFO` without a usable `conversationId`, treat it as a fresh session failure and ask the user to retry
+- If a follow-up request gets a new `conversationId`, assume the previous session expired and continue with the new one
 
 ## Error response structure
 When the backend returns an error body, it uses:
