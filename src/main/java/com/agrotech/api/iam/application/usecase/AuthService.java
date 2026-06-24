@@ -119,6 +119,28 @@ public class AuthService {
         return buildAuthenticationResult(user, profile, farmer, advisor);
     }
 
+    public AuthenticationResult refreshSession(String refreshToken) {
+        if (!bearerTokenService.validateRefreshToken(refreshToken)) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid refresh token");
+        }
+
+        AuthenticatedUser refreshUser = bearerTokenService.getAuthenticatedUserFromRefreshToken(refreshToken);
+        User user = userRepository.findById(refreshUser.userId())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid refresh token"));
+
+        Profile profile = profileRepository.findByUser_Id(user.getId())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.CONFLICT, "User is missing a profile"));
+
+        Farmer farmer = user.getRole() == UserRole.FARMER
+                ? farmerRepository.findByUser_Id(user.getId()).orElseThrow(() -> new ResponseStatusException(HttpStatus.CONFLICT, "Farmer user is missing farmer data"))
+                : null;
+        Advisor advisor = user.getRole() == UserRole.ADVISOR
+                ? advisorRepository.findByUser_Id(user.getId()).orElseThrow(() -> new ResponseStatusException(HttpStatus.CONFLICT, "Advisor user is missing advisor data"))
+                : null;
+
+        return buildAuthenticationResult(user, profile, farmer, advisor);
+    }
+
     private AuthenticationResult buildAuthenticationResult(
             User user,
             Profile profile,
@@ -126,8 +148,9 @@ public class AuthService {
             Advisor advisor
     ) {
         AuthenticatedUser authenticatedUser = authMapper.toAuthenticatedUser(user, profile, farmer, advisor);
-        String token = bearerTokenService.generateToken(authenticatedUser);
-        return new AuthenticationResult(authenticatedUser, token);
+        String token = bearerTokenService.generateAccessToken(authenticatedUser);
+        String refreshToken = bearerTokenService.generateRefreshToken(authenticatedUser);
+        return new AuthenticationResult(authenticatedUser, token, refreshToken);
     }
 
     private String uploadIfPresent(MultipartFile file) throws IOException {

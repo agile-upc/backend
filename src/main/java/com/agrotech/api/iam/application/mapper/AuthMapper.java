@@ -31,7 +31,8 @@ public class AuthMapper {
                 authenticatedUser.role().name(),
                 authenticatedUser.farmerId(),
                 authenticatedUser.advisorId(),
-                authenticationResult.token()
+                authenticationResult.token(),
+                authenticationResult.refreshToken()
         );
     }
 }

@@ -5,6 +5,8 @@ import com.agrotech.api.profile.domain.model.Farmer;
 import com.agrotech.api.shared.infrastructure.persistence.jpa.base.AuditableEntity;
 import jakarta.persistence.*;
 import lombok.*;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 @Entity
 @Table(name = "appointment")
@@ -18,7 +20,8 @@ public class Appointment extends AuditableEntity {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(columnDefinition = "TEXT", nullable = false)
+    @JdbcTypeCode(SqlTypes.LONGVARCHAR)
+    @Column(nullable = false)
     private String message;
 
     @Enumerated(EnumType.STRING)

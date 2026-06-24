@@ -1,6 +1,7 @@
 package com.agrotech.api.iam.infrastructure.web.controller;
 
 import com.agrotech.api.iam.infrastructure.web.dto.AuthenticatedUserResource;
+import com.agrotech.api.iam.infrastructure.web.dto.RefreshTokenResource;
 import com.agrotech.api.iam.infrastructure.web.dto.SignInResource;
 import com.agrotech.api.iam.infrastructure.web.dto.SignUpResource;
 import com.agrotech.api.iam.application.mapper.AuthMapper;
@@ -39,5 +40,10 @@ public class AuthenticationController {
     @PostMapping("/sign-in")
     public ResponseEntity<AuthenticatedUserResource> signIn(@Valid @RequestBody SignInResource signInResource) {
         return ResponseEntity.ok(authMapper.toAuthenticatedUserResource(authService.signIn(signInResource)));
+    }
+
+    @PostMapping("/refresh")
+    public ResponseEntity<AuthenticatedUserResource> refresh(@Valid @RequestBody RefreshTokenResource refreshTokenResource) {
+        return ResponseEntity.ok(authMapper.toAuthenticatedUserResource(authService.refreshSession(refreshTokenResource.refreshToken())));
     }
 }

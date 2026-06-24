@@ -4,11 +4,17 @@ import com.agrotech.api.iam.domain.model.AuthenticatedUser;
 import jakarta.servlet.http.HttpServletRequest;
 
 public interface BearerTokenService {
-    String generateToken(AuthenticatedUser authenticatedUser);
+    String generateAccessToken(AuthenticatedUser authenticatedUser);
+
+    String generateRefreshToken(AuthenticatedUser authenticatedUser);
 
     AuthenticatedUser getAuthenticatedUser(String token);
 
+    AuthenticatedUser getAuthenticatedUserFromRefreshToken(String token);
+
     boolean validateToken(String token);
+
+    boolean validateRefreshToken(String token);
 
     String getBearerTokenFrom(HttpServletRequest request);
 }

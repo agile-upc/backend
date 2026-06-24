@@ -4,6 +4,8 @@ import com.agrotech.api.profile.domain.model.Advisor;
 import com.agrotech.api.shared.infrastructure.persistence.jpa.base.AuditableEntity;
 import jakarta.persistence.*;
 import lombok.*;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 @Entity
 @Table(name = "post")
@@ -19,7 +21,7 @@ public class Post extends AuditableEntity {
 
     private String title;
 
-    @Column(columnDefinition = "TEXT")
+    @JdbcTypeCode(SqlTypes.LONGVARCHAR)
     private String description;
 
     private String image;

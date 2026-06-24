@@ -7,6 +7,7 @@ public record AuthenticatedUserResource(
         String role,
         Long farmerId,
         Long advisorId,
-        String token
+        String token,
+        String refreshToken
 ) {
 }
