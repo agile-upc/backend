@@ -1,8 +1,10 @@
 package com.agrotech.api.appointment.infrastructure.persistence.jpa.repository;
 
 import com.agrotech.api.appointment.domain.model.Appointment;
+import com.agrotech.api.appointment.domain.valueobject.AppointmentStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
 
+import java.time.LocalDate;
 import java.util.List;
 
 public interface AppointmentRepository extends JpaRepository<Appointment, Long> {
@@ -10,4 +12,9 @@ public interface AppointmentRepository extends JpaRepository<Appointment, Long> 
     List<Appointment> findByFarmer_Id(Long farmerId);
     List<Appointment> findByAvailableDate_Advisor_IdAndFarmer_Id(Long advisorId, Long farmerId);
     boolean existsByAvailableDate_Id(Long availableDateId);
+    List<Appointment> findByFarmer_IdAndAvailableDate_ScheduledDateAndStatusNot(
+            Long farmerId,
+            LocalDate scheduledDate,
+            AppointmentStatus status
+    );
 }

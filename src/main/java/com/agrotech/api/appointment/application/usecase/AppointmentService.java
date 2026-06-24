@@ -81,6 +81,10 @@ public class AppointmentService {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Selected available date is already booked");
         }
 
+        if (hasFarmerScheduleConflict(farmer.getId(), availableDate)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Farmer already has an appointment scheduled during this time range");
+        }
+
         Appointment appointment = appointmentRepository.save(Appointment.builder()
                 .farmer(farmer)
                 .availableDate(availableDate)
@@ -151,6 +155,22 @@ public class AppointmentService {
     private AvailableDate requireAvailableDate(Long id) {
         return availableDateRepository.findById(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Available date not found"));
+    }
+
+    private boolean hasFarmerScheduleConflict(Long farmerId, AvailableDate requestedDate) {
+        LocalTime requestedStart = LocalTime.parse(requestedDate.getStartTime());
+        LocalTime requestedEnd = LocalTime.parse(requestedDate.getEndTime());
+
+        return appointmentRepository.findByFarmer_IdAndAvailableDate_ScheduledDateAndStatusNot(
+                farmerId,
+                requestedDate.getScheduledDate(),
+                AppointmentStatus.COMPLETED
+        ).stream().anyMatch((appointment) -> {
+            AvailableDate existingDate = appointment.getAvailableDate();
+            LocalTime existingStart = LocalTime.parse(existingDate.getStartTime());
+            LocalTime existingEnd = LocalTime.parse(existingDate.getEndTime());
+            return requestedStart.isBefore(existingEnd) && requestedEnd.isAfter(existingStart);
+        });
     }
 
     private Appointment refreshStatusIfNeeded(Appointment appointment) {
