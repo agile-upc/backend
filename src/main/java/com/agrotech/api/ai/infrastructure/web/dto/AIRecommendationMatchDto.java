@@ -11,6 +11,7 @@ public record AIRecommendationMatchDto(
         Integer experience,
         String city,
         String country,
+        String spokenLanguages,
         LocalDate nextAvailableDate,
         String why
 ) {

@@ -217,7 +217,7 @@ public class AIService {
                     AIRecommendationStatus.UNAVAILABLE,
                     null,
                     List.of(),
-                    "No hay asesores disponibles con informacion suficiente para recomendarte una opcion ahora mismo.",
+                    "No hay asesores disponibles con información suficiente para recomendarte una opción ahora mismo.",
                     null,
                     null,
                     null,
@@ -292,7 +292,7 @@ public class AIService {
                     AIRecommendationStatus.UNAVAILABLE,
                     null,
                     List.of(),
-                    "No hay asesores disponibles con informacion suficiente para recomendarte una opcion ahora mismo.",
+                    "No hay asesores disponibles con información suficiente para recomendarte una opción ahora mismo.",
                     null,
                     null,
                     session.conversationId(),
@@ -370,7 +370,12 @@ public class AIService {
         double ratingScore = computeRatingScore(projection.getRating());
         double experienceScore = computeExperienceScore(projection.getExperience());
         double availabilityScore = computeAvailabilityScore(projection.getNextAvailableDate());
-        double lexicalScore = computeLexicalScore(farmerContext.message(), projection.getOccupation(), projection.getDescription());
+        double lexicalScore = computeLexicalScore(
+                farmerContext.message(),
+                projection.getOccupation(),
+                projection.getDescription(),
+                projection.getSpokenLanguages()
+        );
 
         return new RankedAdvisorCandidate(
                 projection.getAdvisorId(),
@@ -383,6 +388,7 @@ public class AIService {
                 projection.getDescription(),
                 projection.getPhoto(),
                 projection.getOccupation(),
+                projection.getSpokenLanguages(),
                 projection.getExperience(),
                 projection.getNextAvailableDate(),
                 locationScore + ratingScore + experienceScore + availabilityScore + lexicalScore,
@@ -612,6 +618,8 @@ public class AIService {
                     .append(advisor.fullName())
                     .append(", ocupacion: ")
                     .append(advisor.occupation() == null ? "No especificada" : advisor.occupation())
+                    .append(", idiomas: ")
+                    .append(advisor.spokenLanguages() == null || advisor.spokenLanguages().isBlank() ? "Español" : advisor.spokenLanguages())
                     .append(".\n");
         }
 
@@ -755,7 +763,7 @@ public class AIService {
         return Math.max(3.0, MAX_AVAILABILITY_SCORE - Math.min(daysUntil, 12));
     }
 
-    private double computeLexicalScore(String userMessage, String occupation, String description) {
+    private double computeLexicalScore(String userMessage, String occupation, String description, String spokenLanguages) {
         if (userMessage == null || userMessage.isBlank()) {
             return 0.0;
         }
@@ -768,7 +776,8 @@ public class AIService {
         Set<String> advisorTerms = tokenize(String.join(
                 " ",
                 occupation == null ? "" : occupation,
-                description == null ? "" : description
+                description == null ? "" : description,
+                spokenLanguages == null ? "" : spokenLanguages
         ));
         if (advisorTerms.isEmpty()) {
             return 0.0;
@@ -820,6 +829,7 @@ public class AIService {
             prompt.append("- advisorId: ").append(candidate.advisorId())
                     .append(", ocupacion: ").append(defaultText(candidate.occupation()))
                     .append(", descripcion: ").append(defaultText(candidate.description()))
+                    .append(", idiomas: ").append(defaultText(candidate.spokenLanguages()))
                     .append('\n');
         }
 
@@ -866,6 +876,7 @@ public class AIService {
                 candidate.experience(),
                 candidate.city(),
                 candidate.country(),
+                candidate.spokenLanguages(),
                 candidate.nextAvailableDate(),
                 buildWhy(candidate)
         );
@@ -886,6 +897,9 @@ public class AIService {
         }
         if (candidate.experience() != null && candidate.experience() > 0) {
             reasons.add(candidate.experience() + " años de experiencia");
+        }
+        if (candidate.spokenLanguages() != null && !candidate.spokenLanguages().isBlank()) {
+            reasons.add("puede atender en " + candidate.spokenLanguages());
         }
         if (candidate.nextAvailableDate() != null) {
             reasons.add("tiene disponibilidad desde el " + formatHumanDate(candidate.nextAvailableDate()));
@@ -1021,7 +1035,7 @@ public class AIService {
             String outputInstruction
     ) {
         StringBuilder prompt = new StringBuilder("""
-                Eres AgroBot. Redacta respuestas cortas, claras y utiles para un agricultor.
+                Eres AgroBot. Redacta respuestas cortas, claras y útiles para un agricultor.
                 No uses markdown.
                 """);
         prompt.append(outputInstruction).append('\n')
@@ -1067,6 +1081,7 @@ public class AIService {
                     .append(candidate.fullName())
                     .append(" | ocupacion: ").append(defaultText(candidate.occupation()))
                     .append(" | experiencia: ").append(candidate.experience() == null ? 0 : candidate.experience())
+                    .append(" | idiomas: ").append(defaultText(candidate.spokenLanguages()))
                     .append(" | rating: ").append(candidate.rating() == null ? "sin dato" : candidate.rating())
                     .append(" | disponible desde: ").append(candidate.nextAvailableDate() == null ? "sin fecha" : candidate.nextAvailableDate())
                     .append('\n');
@@ -1221,7 +1236,8 @@ public class AIService {
                 + " (advisorId: " + bestCandidate.advisorId()
                 + ", ocupacion: " + defaultText(bestCandidate.occupation())
                 + ", ciudad: " + defaultText(bestCandidate.city())
-                + ", pais: " + defaultText(bestCandidate.country())
+                + ", país: " + defaultText(bestCandidate.country())
+                + ", idiomas: " + defaultText(bestCandidate.spokenLanguages())
                 + ")";
     }
 
@@ -1230,16 +1246,16 @@ public class AIService {
         if (bestCandidate.locationScore() >= LOCATION_CITY_SCORE) {
             reasons.add("coincide con tu ciudad");
         } else if (bestCandidate.locationScore() >= LOCATION_COUNTRY_SCORE) {
-            reasons.add("atiende en tu mismo pais");
+            reasons.add("atiende en tu mismo país");
         }
         if (bestCandidate.semanticScore() > 0 || bestCandidate.lexicalScore() > 0) {
             reasons.add("su perfil se alinea con tu necesidad");
         }
         if (bestCandidate.rating() != null) {
-            reasons.add("tiene una calificacion de " + bestCandidate.rating().setScale(1, RoundingMode.HALF_UP));
+            reasons.add("tiene una calificación de " + bestCandidate.rating().setScale(1, RoundingMode.HALF_UP));
         }
         if (bestCandidate.experience() != null && bestCandidate.experience() > 0) {
-            reasons.add("aporta " + bestCandidate.experience() + " anos de experiencia");
+            reasons.add("aporta " + bestCandidate.experience() + " años de experiencia");
         }
         if (bestCandidate.nextAvailableDate() != null) {
             reasons.add("cuenta con disponibilidad desde el " + formatHumanDate(bestCandidate.nextAvailableDate()));
@@ -1257,7 +1273,7 @@ public class AIService {
     private String buildAppointmentContextMessage(String advisorName, String situation) {
         return "Hola " + advisorName
                 + ", quiero compartir el contexto de mi caso para nuestra reunion virtual. "
-                + "Necesito asesoria sobre " + situation
+                + "Necesito asesoría sobre " + situation
                 + " y quiero revisar contigo las posibles causas, el manejo recomendado y los siguientes pasos.";
     }
 
@@ -1309,6 +1325,7 @@ public class AIService {
             String description,
             String photo,
             String occupation,
+            String spokenLanguages,
             Integer experience,
             LocalDate nextAvailableDate,
             double baseScore,
@@ -1335,6 +1352,7 @@ public class AIService {
                     description,
                     photo,
                     occupation,
+                    spokenLanguages,
                     experience,
                     nextAvailableDate,
                     baseScore,

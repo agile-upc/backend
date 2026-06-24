@@ -18,14 +18,17 @@ public interface AdvisorRepository extends JpaRepository<Advisor, Long> {
             select
                 advisor.id as advisorId,
                 user.id as userId,
+                profile.id as profileId,
                 advisor.rating as rating,
                 profile.firstName as firstName,
                 profile.lastName as lastName,
                 profile.city as city,
                 profile.country as country,
+                profile.birthDate as birthDate,
                 profile.description as description,
                 profile.photo as photo,
                 profile.occupation as occupation,
+                profile.spokenLanguages as spokenLanguages,
                 profile.experience as experience,
                 (
                     select min(availableDate.scheduledDate)

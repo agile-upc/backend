@@ -28,10 +28,22 @@ public class AvailableDateService {
         this.profileService = profileService;
     }
 
-    public List<AvailableDate> getAvailableDates(Long advisorId, Boolean isAvailable) {
+    public List<AvailableDate> getAvailableDates(Long advisorId, Boolean isAvailable, LocalDate scheduledDate) {
         List<AvailableDate> availableDates;
 
-        if (advisorId != null && isAvailable != null) {
+        if (advisorId != null && isAvailable != null && scheduledDate != null) {
+            availableDates = availableDateRepository.findByAdvisor_IdAndStatusAndScheduledDateOrderByScheduledDateAscStartTimeAsc(
+                    advisorId,
+                    toStatus(isAvailable),
+                    scheduledDate
+            );
+        } else if (advisorId != null && scheduledDate != null) {
+            availableDates = availableDateRepository.findByAdvisor_IdAndScheduledDateOrderByScheduledDateAscStartTimeAsc(advisorId, scheduledDate);
+        } else if (isAvailable != null && scheduledDate != null) {
+            availableDates = availableDateRepository.findByStatusAndScheduledDateOrderByScheduledDateAscStartTimeAsc(toStatus(isAvailable), scheduledDate);
+        } else if (scheduledDate != null) {
+            availableDates = availableDateRepository.findByScheduledDateOrderByScheduledDateAscStartTimeAsc(scheduledDate);
+        } else if (advisorId != null && isAvailable != null) {
             availableDates = availableDateRepository.findByAdvisor_IdAndStatusOrderByScheduledDateAscStartTimeAsc(
                     advisorId,
                     toStatus(isAvailable)

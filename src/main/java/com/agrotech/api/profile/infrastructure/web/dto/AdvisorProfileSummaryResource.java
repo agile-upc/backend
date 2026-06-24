@@ -13,6 +13,7 @@ public record AdvisorProfileSummaryResource(
         String description,
         String photo,
         String occupation,
+        String spokenLanguages,
         Integer experience
 ) {
 }

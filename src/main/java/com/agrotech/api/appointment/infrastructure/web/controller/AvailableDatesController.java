@@ -10,6 +10,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.LocalDate;
 import java.util.List;
 
 import static org.springframework.http.MediaType.APPLICATION_JSON_VALUE;
@@ -29,9 +30,10 @@ public class AvailableDatesController {
     @GetMapping
     public ResponseEntity<List<AvailableDateResource>> getAvailableDates(
             @RequestParam(value = "advisorId", required = false) Long advisorId,
-            @RequestParam(value = "isAvailable", required = false) Boolean isAvailable
+            @RequestParam(value = "isAvailable", required = false) Boolean isAvailable,
+            @RequestParam(value = "scheduledDate", required = false) LocalDate scheduledDate
     ) {
-        return ResponseEntity.ok(availableDateService.getAvailableDates(advisorId, isAvailable).stream().map(appointmentMapper::toAvailableDateResource).toList());
+        return ResponseEntity.ok(availableDateService.getAvailableDates(advisorId, isAvailable, scheduledDate).stream().map(appointmentMapper::toAvailableDateResource).toList());
     }
 
     @GetMapping("/{id}")

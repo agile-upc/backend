@@ -21,5 +21,6 @@ public record UpdateProfileResource(
         @Schema(type = "string", format = "binary")
         MultipartFile photo,
         String occupation,
+        String spokenLanguages,
         Integer experience
 ){}

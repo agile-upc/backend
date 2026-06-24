@@ -12,4 +12,5 @@ public record ProfileResource(Long id,
                               String description,
                               String photo,
                               String occupation,
+                              String spokenLanguages,
                               Integer experience){}

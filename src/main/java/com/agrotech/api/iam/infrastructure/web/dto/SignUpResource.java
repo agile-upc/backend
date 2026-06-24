@@ -30,6 +30,7 @@ public record SignUpResource(
         @Schema(type = "string", format = "binary")
         MultipartFile photo,
         String occupation,
+        String spokenLanguages,
         Integer experience
 ) {
 }

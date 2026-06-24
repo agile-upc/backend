@@ -92,6 +92,7 @@ public class AuthService {
                 .description(resource.description())
                 .photo(uploadIfPresent(resource.photo()))
                 .occupation(resource.occupation())
+                .spokenLanguages(resource.spokenLanguages())
                 .experience(resource.experience() != null ? resource.experience() : 0)
                 .build());
 

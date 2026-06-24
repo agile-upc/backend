@@ -20,5 +20,6 @@ public record CreateProfileResource(
         @NotNull
         MultipartFile photo,
         String occupation,
+        String spokenLanguages,
         Integer experience
 ){}

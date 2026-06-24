@@ -113,6 +113,11 @@ class AIServiceRecommendationConsistencyTest {
             }
 
             @Override
+            public Long getProfileId() {
+                return advisorId + 1000;
+            }
+
+            @Override
             public BigDecimal getRating() {
                 return new BigDecimal(rating);
             }
@@ -138,6 +143,11 @@ class AIServiceRecommendationConsistencyTest {
             }
 
             @Override
+            public LocalDate getBirthDate() {
+                return TODAY.minusYears(40);
+            }
+
+            @Override
             public String getDescription() {
                 return "Asesor agricola disponible";
             }
@@ -150,6 +160,11 @@ class AIServiceRecommendationConsistencyTest {
             @Override
             public String getOccupation() {
                 return occupation;
+            }
+
+            @Override
+            public String getSpokenLanguages() {
+                return "Espanol";
             }
 
             @Override

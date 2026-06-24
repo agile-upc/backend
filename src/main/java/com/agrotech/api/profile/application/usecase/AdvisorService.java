@@ -2,6 +2,7 @@ package com.agrotech.api.profile.application.usecase;
 
 import com.agrotech.api.iam.application.usecase.AuthenticatedUserService;
 import com.agrotech.api.iam.domain.valueobject.UserRole;
+import com.agrotech.api.appointment.domain.valueobject.AvailableDateStatus;
 import com.agrotech.api.profile.application.mapper.ProfileMapper;
 import com.agrotech.api.profile.domain.model.Advisor;
 import com.agrotech.api.profile.domain.model.Profile;
@@ -12,6 +13,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
@@ -37,11 +39,8 @@ public class AdvisorService {
     }
 
     public List<AdvisorCatalogResource> getAdvisorCatalog() {
-        return advisorRepository.findAll().stream()
-                .map(advisor -> profileMapper.toAdvisorCatalogResource(
-                        advisor,
-                        getProfileByUserId(advisor.getUser().getId())
-                ))
+        return advisorRepository.findRecommendationInputs(AvailableDateStatus.AVAILABLE, LocalDate.now()).stream()
+                .map(profileMapper::toAdvisorCatalogResource)
                 .toList();
     }
 
@@ -85,7 +84,8 @@ public class AdvisorService {
                     return new AdvisorRecommendationOption(
                             advisor.getId(),
                             fullName,
-                            profile.getOccupation()
+                            profile.getOccupation(),
+                            profile.getSpokenLanguages()
                     );
                 })
                 .filter(option -> option != null)
@@ -95,7 +95,8 @@ public class AdvisorService {
     public record AdvisorRecommendationOption(
             Long advisorId,
             String fullName,
-            String occupation
+            String occupation,
+            String spokenLanguages
     ) {
     }
 

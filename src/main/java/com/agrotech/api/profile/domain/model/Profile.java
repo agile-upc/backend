@@ -30,6 +30,7 @@ public class Profile extends AuditableEntity {
     private String description;
     private String photo;
     private String occupation;
+    private String spokenLanguages;
 
     @Builder.Default
     private Integer experience = 0;

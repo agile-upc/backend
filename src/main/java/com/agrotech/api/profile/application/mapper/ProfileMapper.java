@@ -12,6 +12,7 @@ import com.agrotech.api.profile.infrastructure.web.dto.UpdateProfileResource;
 import com.agrotech.api.profile.domain.model.Advisor;
 import com.agrotech.api.profile.domain.model.Farmer;
 import com.agrotech.api.profile.domain.model.Profile;
+import com.agrotech.api.profile.infrastructure.persistence.jpa.projection.AdvisorRecommendationProjection;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -28,6 +29,7 @@ public class ProfileMapper {
                 profile.getDescription(),
                 profile.getPhoto(),
                 profile.getOccupation(),
+                profile.getSpokenLanguages(),
                 profile.getExperience()
         );
     }
@@ -49,6 +51,28 @@ public class ProfileMapper {
         );
     }
 
+    public AdvisorCatalogResource toAdvisorCatalogResource(AdvisorRecommendationProjection projection) {
+        return new AdvisorCatalogResource(
+                projection.getAdvisorId(),
+                projection.getUserId(),
+                projection.getRating(),
+                new AdvisorProfileSummaryResource(
+                        projection.getProfileId(),
+                        projection.getUserId(),
+                        projection.getFirstName(),
+                        projection.getLastName(),
+                        projection.getCity(),
+                        projection.getCountry(),
+                        projection.getBirthDate(),
+                        projection.getDescription(),
+                        projection.getPhoto(),
+                        projection.getOccupation(),
+                        projection.getSpokenLanguages(),
+                        projection.getExperience()
+                )
+        );
+    }
+
     public AdvisorProfileSummaryResource toAdvisorProfileSummaryResource(Profile profile) {
         return new AdvisorProfileSummaryResource(
                 profile.getId(),
@@ -61,6 +85,7 @@ public class ProfileMapper {
                 profile.getDescription(),
                 profile.getPhoto(),
                 profile.getOccupation(),
+                profile.getSpokenLanguages(),
                 profile.getExperience()
         );
     }
@@ -77,6 +102,7 @@ public class ProfileMapper {
                 profile.getDescription(),
                 profile.getPhoto(),
                 profile.getOccupation(),
+                profile.getSpokenLanguages(),
                 profile.getExperience()
         );
     }
@@ -91,6 +117,7 @@ public class ProfileMapper {
                 .birthDate(resource.birthDate())
                 .description(resource.description())
                 .occupation(resource.occupation())
+                .spokenLanguages(resource.spokenLanguages())
                 .experience(resource.experience() != null ? resource.experience() : 0)
                 .photo(photo)
                 .build();
@@ -104,6 +131,7 @@ public class ProfileMapper {
         profile.setBirthDate(resource.birthDate());
         profile.setDescription(resource.description());
         profile.setOccupation(resource.occupation());
+        profile.setSpokenLanguages(resource.spokenLanguages());
         profile.setExperience(resource.experience() != null ? resource.experience() : 0);
         if (uploadedPhoto != null) {
             profile.setPhoto(uploadedPhoto);

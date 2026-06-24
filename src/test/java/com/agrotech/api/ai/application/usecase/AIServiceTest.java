@@ -224,6 +224,11 @@ class AIServiceTest {
             }
 
             @Override
+            public Long getProfileId() {
+                return userId + 1000;
+            }
+
+            @Override
             public BigDecimal getRating() {
                 return new BigDecimal(rating);
             }
@@ -249,6 +254,11 @@ class AIServiceTest {
             }
 
             @Override
+            public LocalDate getBirthDate() {
+                return TODAY.minusYears(40);
+            }
+
+            @Override
             public String getDescription() {
                 return description;
             }
@@ -261,6 +271,11 @@ class AIServiceTest {
             @Override
             public String getOccupation() {
                 return occupation;
+            }
+
+            @Override
+            public String getSpokenLanguages() {
+                return "Espanol, Quechua";
             }
 
             @Override

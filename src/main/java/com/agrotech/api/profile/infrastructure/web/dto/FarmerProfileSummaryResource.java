@@ -13,6 +13,7 @@ public record FarmerProfileSummaryResource(
         String description,
         String photo,
         String occupation,
+        String spokenLanguages,
         Integer experience
 ) {
 }
