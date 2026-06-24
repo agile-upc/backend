@@ -18,6 +18,15 @@ Spring Boot backend for the Agrotech platform. It provides authentication, profi
 - `POST /api/v1/authentication/sign-up` creates the user and initial profile in one multipart request
 - Profile photos and post images are returned as direct public GCS URLs
 
+## Advisory workflow
+- Farmers use the advisor catalog and advisor detail APIs to evaluate advisors before booking.
+- Advisors create, update, and delete available schedule slots through `/api/v1/available_dates`.
+- Farmers book advisory sessions through `/api/v1/appointments` with an `availableDateId` and consultation `message`.
+- Creating an appointment marks the selected available date as `UNAVAILABLE`.
+- Booking checks both the available date status and existing appointments for the same slot before creating a new appointment.
+- Appointment detail responses include the farmer/advisor profile summaries, selected schedule, meeting URL, status, and consultation message.
+- AI recommendation endpoints return advisor candidates and a draft consultation message for handoff into the booking flow.
+
 ## Project docs
 - API contract: [endpoints.md](./endpoints.md)
 - Deployment guide: [deployment.md](./deployment.md)

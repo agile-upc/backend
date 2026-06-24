@@ -9,4 +9,5 @@ public interface AppointmentRepository extends JpaRepository<Appointment, Long> 
     List<Appointment> findByAvailableDate_Advisor_Id(Long advisorId);
     List<Appointment> findByFarmer_Id(Long farmerId);
     List<Appointment> findByAvailableDate_Advisor_IdAndFarmer_Id(Long advisorId, Long farmerId);
+    boolean existsByAvailableDate_Id(Long availableDateId);
 }

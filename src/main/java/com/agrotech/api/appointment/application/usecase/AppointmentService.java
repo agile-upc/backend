@@ -74,7 +74,10 @@ public class AppointmentService {
         Farmer farmer = profileService.requireCurrentFarmerEntity();
         AvailableDate availableDate = requireAvailableDate(resource.availableDateId());
 
-        if (availableDate.getStatus() == AvailableDateStatus.UNAVAILABLE) {
+        if (
+                availableDate.getStatus() == AvailableDateStatus.UNAVAILABLE ||
+                appointmentRepository.existsByAvailableDate_Id(availableDate.getId())
+        ) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Selected available date is already booked");
         }
 
