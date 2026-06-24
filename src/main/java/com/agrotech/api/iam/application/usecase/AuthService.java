@@ -150,6 +150,7 @@ public class AuthService {
             Farmer farmer,
             Advisor advisor
     ) {
+        ensureAdvisorSpokenLanguages(user, profile);
         AuthenticatedUser authenticatedUser = authMapper.toAuthenticatedUser(user, profile, farmer, advisor);
         String token = bearerTokenService.generateAccessToken(authenticatedUser);
         String refreshToken = bearerTokenService.generateRefreshToken(authenticatedUser);
@@ -169,5 +170,14 @@ public class AuthService {
         }
 
         return value;
+    }
+
+    private void ensureAdvisorSpokenLanguages(User user, Profile profile) {
+        if (user.getRole() != UserRole.ADVISOR || (profile.getSpokenLanguages() != null && !profile.getSpokenLanguages().isBlank())) {
+            return;
+        }
+
+        profile.setSpokenLanguages(DEFAULT_ADVISOR_LANGUAGE);
+        profileRepository.save(profile);
     }
 }
