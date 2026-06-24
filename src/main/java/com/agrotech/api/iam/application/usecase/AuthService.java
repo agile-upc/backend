@@ -28,6 +28,8 @@ import java.math.BigDecimal;
 
 @Service
 public class AuthService {
+    private static final String DEFAULT_ADVISOR_LANGUAGE = "Español";
+
     private final UserRepository userRepository;
     private final ProfileRepository profileRepository;
     private final FarmerRepository farmerRepository;
@@ -92,7 +94,7 @@ public class AuthService {
                 .description(resource.description())
                 .photo(uploadIfPresent(resource.photo()))
                 .occupation(resource.occupation())
-                .spokenLanguages(resource.spokenLanguages())
+                .spokenLanguages(spokenLanguagesFor(role, resource.spokenLanguages()))
                 .experience(resource.experience() != null ? resource.experience() : 0)
                 .build());
 
@@ -159,5 +161,13 @@ public class AuthService {
             return null;
         }
         return googleStorageService.uploadFile(file);
+    }
+
+    private String spokenLanguagesFor(UserRole role, String value) {
+        if (role == UserRole.ADVISOR && (value == null || value.isBlank())) {
+            return DEFAULT_ADVISOR_LANGUAGE;
+        }
+
+        return value;
     }
 }

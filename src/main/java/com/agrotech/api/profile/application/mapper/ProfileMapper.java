@@ -1,6 +1,7 @@
 package com.agrotech.api.profile.application.mapper;
 
 import com.agrotech.api.iam.domain.model.User;
+import com.agrotech.api.iam.domain.valueobject.UserRole;
 import com.agrotech.api.profile.infrastructure.web.dto.AdvisorResource;
 import com.agrotech.api.profile.infrastructure.web.dto.AdvisorCatalogResource;
 import com.agrotech.api.profile.infrastructure.web.dto.AdvisorProfileSummaryResource;
@@ -17,6 +18,8 @@ import org.springframework.stereotype.Component;
 
 @Component
 public class ProfileMapper {
+    private static final String DEFAULT_ADVISOR_LANGUAGE = "Español";
+
     public ProfileResource toProfileResource(Profile profile) {
         return new ProfileResource(
                 profile.getId(),
@@ -29,7 +32,7 @@ public class ProfileMapper {
                 profile.getDescription(),
                 profile.getPhoto(),
                 profile.getOccupation(),
-                profile.getSpokenLanguages(),
+                spokenLanguagesFor(profile),
                 profile.getExperience()
         );
     }
@@ -67,7 +70,7 @@ public class ProfileMapper {
                         projection.getDescription(),
                         projection.getPhoto(),
                         projection.getOccupation(),
-                        projection.getSpokenLanguages(),
+                        defaultSpokenLanguages(projection.getSpokenLanguages()),
                         projection.getExperience()
                 )
         );
@@ -85,7 +88,7 @@ public class ProfileMapper {
                 profile.getDescription(),
                 profile.getPhoto(),
                 profile.getOccupation(),
-                profile.getSpokenLanguages(),
+                spokenLanguagesFor(profile),
                 profile.getExperience()
         );
     }
@@ -117,7 +120,7 @@ public class ProfileMapper {
                 .birthDate(resource.birthDate())
                 .description(resource.description())
                 .occupation(resource.occupation())
-                .spokenLanguages(resource.spokenLanguages())
+                .spokenLanguages(spokenLanguagesFor(user, resource.spokenLanguages()))
                 .experience(resource.experience() != null ? resource.experience() : 0)
                 .photo(photo)
                 .build();
@@ -131,10 +134,26 @@ public class ProfileMapper {
         profile.setBirthDate(resource.birthDate());
         profile.setDescription(resource.description());
         profile.setOccupation(resource.occupation());
-        profile.setSpokenLanguages(resource.spokenLanguages());
+        profile.setSpokenLanguages(spokenLanguagesFor(profile.getUser(), resource.spokenLanguages()));
         profile.setExperience(resource.experience() != null ? resource.experience() : 0);
         if (uploadedPhoto != null) {
             profile.setPhoto(uploadedPhoto);
         }
+    }
+
+    private String spokenLanguagesFor(Profile profile) {
+        return spokenLanguagesFor(profile.getUser(), profile.getSpokenLanguages());
+    }
+
+    private String spokenLanguagesFor(User user, String value) {
+        if (user != null && user.getRole() == UserRole.ADVISOR) {
+            return defaultSpokenLanguages(value);
+        }
+
+        return value;
+    }
+
+    private String defaultSpokenLanguages(String value) {
+        return value == null || value.isBlank() ? DEFAULT_ADVISOR_LANGUAGE : value;
     }
 }

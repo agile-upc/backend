@@ -21,6 +21,8 @@ import java.util.stream.Collectors;
 
 @Service
 public class AdvisorService {
+    private static final String DEFAULT_ADVISOR_LANGUAGE = "Español";
+
     private final AdvisorRepository advisorRepository;
     private final ProfileRepository profileRepository;
     private final AuthenticatedUserService authenticatedUserService;
@@ -85,7 +87,7 @@ public class AdvisorService {
                             advisor.getId(),
                             fullName,
                             profile.getOccupation(),
-                            profile.getSpokenLanguages()
+                            defaultSpokenLanguages(profile.getSpokenLanguages())
                     );
                 })
                 .filter(option -> option != null)
@@ -113,5 +115,9 @@ public class AdvisorService {
     private Profile getProfileByUserId(Long userId) {
         return profileRepository.findByUser_Id(userId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Profile not found"));
+    }
+
+    private String defaultSpokenLanguages(String value) {
+        return value == null || value.isBlank() ? DEFAULT_ADVISOR_LANGUAGE : value;
     }
 }
