@@ -237,6 +237,62 @@ Request body for `PUT /api/v1/posts/{id}` is the same structure, but `image` is 
 
 `image` is a public browser-accessible GCS URL.
 
+### Educational resource
+Returned by:
+- `GET /api/v1/educational-resources`
+
+```json
+{
+  "id": 1,
+  "title": "Guía de Buenas Prácticas Agrícolas para cultivo de maíz",
+  "summary": "Recurso educativo de SENASA.",
+  "type": "GUIDE",
+  "sourceName": "SENASA - Guías de Buenas Prácticas Agrícolas",
+  "sourceUrl": "https://www.gob.pe/...",
+  "downloadUrl": "https://www.gob.pe/.../download",
+  "thumbnailUrl": null,
+  "publishedAt": null,
+  "topics": ["Buenas prácticas agrícolas", "Perú"]
+}
+```
+
+Resource `type` values are `GUIDE`, `MANUAL`, `BOOK`, `VIDEO`, `COURSE`, and `TOOL`.
+
+Admin import endpoint:
+- `POST /api/v1/educational-resources/import`
+- requires an authenticated `ADMIN` token
+- upserts resources by `sourceUrl`
+
+```json
+{
+  "resources": [
+    {
+      "title": "Manual técnico del cultivo de papa",
+      "summary": "Manual educativo publicado por INIA.",
+      "type": "MANUAL",
+      "sourceName": "INIA - Manuales y guías",
+      "sourceUrl": "https://repositorio.inia.gob.pe/...",
+      "downloadUrl": "https://repositorio.inia.gob.pe/.../download",
+      "thumbnailUrl": null,
+      "publishedAt": null,
+      "topics": ["Cultivos", "Perú"]
+    }
+  ]
+}
+```
+
+Import response:
+
+```json
+{
+  "created": 10,
+  "updated": 2,
+  "skipped": 1
+}
+```
+
+Educational resources are not posts. They are not connected to advisors, advisor profiles, or post ownership.
+
 ### Available date
 Returned by:
 - `GET /api/v1/available_dates`
@@ -680,6 +736,14 @@ All delete endpoints return plain text, not JSON.
 - `DELETE /api/v1/posts/{id}`
   - response: plain text success message
 
+### Educational resources
+- `GET /api/v1/educational-resources`
+  - response: `Array<Educational resource>`
+- `POST /api/v1/educational-resources/import`
+  - request: educational resource import body
+  - response: import summary
+  - requires `ADMIN`
+
 ### Available dates
 - `GET /api/v1/available_dates`
   - query params: optional `advisorId`, optional `isAvailable`
@@ -746,3 +810,24 @@ All delete endpoints return plain text, not JSON.
 - A farmer account normally creates appointments and reviews
 - An advisor account normally creates available dates and posts
 - If you upload a new profile photo or post image, replace the previous URL with the new value returned by the backend
+
+## Educational resource ingestion scripts
+- Review curated sources in `scripts/educational_sources.json`
+- Fetch source metadata:
+
+```bash
+python scripts/fetch_educational_resources.py --output scripts/generated/educational_resources.json
+```
+
+- Review the generated JSON before import.
+- Upload with an admin token:
+
+```bash
+python scripts/upload_educational_resources.py --base-url http://localhost:8080/api/v1 --token <admin-token>
+```
+
+- Or upload with admin credentials:
+
+```bash
+python scripts/upload_educational_resources.py --base-url http://localhost:8080/api/v1 --username admin@example.com --password secret
+```
