@@ -6,6 +6,7 @@ public record AdvisorCatalogResource(
         Long advisorId,
         Long userId,
         BigDecimal rating,
-        AdvisorProfileSummaryResource profile
+        AdvisorProfileSummaryResource profile,
+        boolean validated
 ) {
 }

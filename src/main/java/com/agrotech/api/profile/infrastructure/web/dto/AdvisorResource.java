@@ -4,5 +4,6 @@ import java.math.BigDecimal;
 
 public record AdvisorResource(Long id,
                               Long userId,
-                              BigDecimal rating) {
+                              BigDecimal rating,
+                              boolean validated) {
 }

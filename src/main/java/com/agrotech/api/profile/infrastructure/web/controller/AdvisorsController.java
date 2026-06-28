@@ -37,7 +37,10 @@ public class AdvisorsController {
 
     @GetMapping
     public ResponseEntity<AdvisorResource> getCurrentAdvisor() {
-        return ResponseEntity.ok(profileMapper.toAdvisorResource(advisorService.getCurrentAdvisor()));
+        return ResponseEntity.ok(profileMapper.toAdvisorResource(
+                advisorService.getCurrentAdvisor(),
+                advisorService.isCurrentAdvisorValidated()
+        ));
     }
 
     @GetMapping("/{id}")

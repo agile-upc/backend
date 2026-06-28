@@ -6,6 +6,8 @@ import com.agrotech.api.appointment.domain.valueobject.AvailableDateStatus;
 import com.agrotech.api.profile.application.mapper.ProfileMapper;
 import com.agrotech.api.profile.domain.model.Advisor;
 import com.agrotech.api.profile.domain.model.Profile;
+import com.agrotech.api.profile.domain.valueobject.AdvisorCredentialStatus;
+import com.agrotech.api.profile.infrastructure.persistence.jpa.repository.AdvisorCredentialRepository;
 import com.agrotech.api.profile.infrastructure.persistence.jpa.repository.AdvisorRepository;
 import com.agrotech.api.profile.infrastructure.persistence.jpa.repository.ProfileRepository;
 import com.agrotech.api.profile.infrastructure.web.dto.AdvisorCatalogResource;
@@ -25,24 +27,27 @@ public class AdvisorService {
 
     private final AdvisorRepository advisorRepository;
     private final ProfileRepository profileRepository;
+    private final AdvisorCredentialRepository advisorCredentialRepository;
     private final AuthenticatedUserService authenticatedUserService;
     private final ProfileMapper profileMapper;
 
     public AdvisorService(
             AdvisorRepository advisorRepository,
             ProfileRepository profileRepository,
+            AdvisorCredentialRepository advisorCredentialRepository,
             AuthenticatedUserService authenticatedUserService,
             ProfileMapper profileMapper
     ) {
         this.advisorRepository = advisorRepository;
         this.profileRepository = profileRepository;
+        this.advisorCredentialRepository = advisorCredentialRepository;
         this.authenticatedUserService = authenticatedUserService;
         this.profileMapper = profileMapper;
     }
 
     public List<AdvisorCatalogResource> getAdvisorCatalog() {
         return advisorRepository.findRecommendationInputs(AvailableDateStatus.AVAILABLE, LocalDate.now()).stream()
-                .map(profileMapper::toAdvisorCatalogResource)
+                .map(projection -> profileMapper.toAdvisorCatalogResource(projection, isValidated(projection.getAdvisorId())))
                 .toList();
     }
 
@@ -50,7 +55,8 @@ public class AdvisorService {
         Advisor advisor = getAdvisorEntity(id);
         return profileMapper.toAdvisorCatalogResource(
                 advisor,
-                getProfileByUserId(advisor.getUser().getId())
+                getProfileByUserId(advisor.getUser().getId()),
+                isValidated(advisor.getId())
         );
     }
 
@@ -65,6 +71,11 @@ public class AdvisorService {
     public Advisor getCurrentAdvisor() {
         Long advisorId = authenticatedUserService.requireRole(UserRole.ADVISOR).advisorId();
         return getAdvisorEntity(advisorId);
+    }
+
+    public boolean isCurrentAdvisorValidated() {
+        Long advisorId = authenticatedUserService.requireRole(UserRole.ADVISOR).advisorId();
+        return isValidated(advisorId);
     }
 
     public void deleteAdvisor(Long id) {
@@ -119,5 +130,9 @@ public class AdvisorService {
 
     private String defaultSpokenLanguages(String value) {
         return value == null || value.isBlank() ? DEFAULT_ADVISOR_LANGUAGE : value;
+    }
+
+    private boolean isValidated(Long advisorId) {
+        return advisorCredentialRepository.existsByAdvisor_IdAndStatus(advisorId, AdvisorCredentialStatus.APPROVED);
     }
 }

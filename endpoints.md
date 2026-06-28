@@ -812,22 +812,29 @@ All delete endpoints return plain text, not JSON.
 - If you upload a new profile photo or post image, replace the previous URL with the new value returned by the backend
 
 ## Educational resource ingestion scripts
-- Review curated sources in `scripts/educational_sources.json`
-- Fetch source metadata:
+- Review curated sources in `scripts/education/educational_sources.json`
+- Set `GEMINI_API_KEY` when you want AI relevance validation before upload.
+- Discover source metadata and write a review report:
 
 ```bash
-python scripts/fetch_educational_resources.py --output scripts/generated/educational_resources.json
+node scripts/education/discover_educational_resources.mjs --require-gemini --output scripts/education/generated/educational_resources.json
 ```
 
-- Review the generated JSON before import.
+- Review `scripts/education/generated/educational_resources.json`, `scripts/education/generated/educational_resources.report.json`, and Gemini rejections before import.
+- Validate the generated payload:
+
+```bash
+node scripts/education/validate_educational_resources.mjs --input scripts/education/generated/educational_resources.json
+```
+
 - Upload with an admin token:
 
 ```bash
-python scripts/upload_educational_resources.py --base-url http://localhost:8080/api/v1 --token <admin-token>
+node scripts/education/upload_educational_resources.mjs --base-url http://localhost:8080/api/v1 --token <admin-token> --require-gemini-report
 ```
 
 - Or upload with admin credentials:
 
 ```bash
-python scripts/upload_educational_resources.py --base-url http://localhost:8080/api/v1 --username admin@example.com --password secret
+node scripts/education/upload_educational_resources.mjs --base-url http://localhost:8080/api/v1 --username admin@example.com --password secret --require-gemini-report
 ```

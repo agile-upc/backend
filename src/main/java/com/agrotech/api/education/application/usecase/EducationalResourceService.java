@@ -36,6 +36,44 @@ public class EducationalResourceService {
     }
 
     @Transactional
+    public EducationalResource createResource(ImportEducationalResourceResource resource) {
+        authenticatedUserService.requireRole(UserRole.ADMIN);
+        requireValid(resource);
+
+        if (educationalResourceRepository.findBySourceUrl(resource.sourceUrl().trim()).isPresent()) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Educational resource sourceUrl already exists");
+        }
+
+        return educationalResourceRepository.save(educationalResourceMapper.toEntity(normalize(resource)));
+    }
+
+    @Transactional
+    public EducationalResource updateResource(Long id, ImportEducationalResourceResource resource) {
+        authenticatedUserService.requireRole(UserRole.ADMIN);
+        requireValid(resource);
+
+        EducationalResource existing = educationalResourceRepository.findById(id)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Educational resource not found"));
+
+        educationalResourceRepository.findBySourceUrl(resource.sourceUrl().trim())
+                .filter(resourceWithSameUrl -> !resourceWithSameUrl.getId().equals(id))
+                .ifPresent(resourceWithSameUrl -> {
+                    throw new ResponseStatusException(HttpStatus.CONFLICT, "Educational resource sourceUrl already exists");
+                });
+
+        educationalResourceMapper.updateEntity(existing, normalize(resource));
+        return educationalResourceRepository.save(existing);
+    }
+
+    @Transactional
+    public void deleteResource(Long id) {
+        authenticatedUserService.requireRole(UserRole.ADMIN);
+        EducationalResource existing = educationalResourceRepository.findById(id)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Educational resource not found"));
+        educationalResourceRepository.delete(existing);
+    }
+
+    @Transactional
     public ImportEducationalResourcesResponse importResources(ImportEducationalResourcesRequest request) {
         authenticatedUserService.requireRole(UserRole.ADMIN);
         if (request == null || request.resources() == null) {
@@ -65,6 +103,12 @@ public class EducationalResourceService {
         }
 
         return new ImportEducationalResourcesResponse(created, updated, skipped);
+    }
+
+    private void requireValid(ImportEducationalResourceResource resource) {
+        if (!isValid(resource)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "title, type, sourceName and sourceUrl are required");
+        }
     }
 
     private boolean isValid(ImportEducationalResourceResource resource) {

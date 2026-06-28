@@ -42,19 +42,32 @@ public class ProfileMapper {
     }
 
     public AdvisorResource toAdvisorResource(Advisor advisor) {
-        return new AdvisorResource(advisor.getId(), advisor.getUser().getId(), advisor.getRating());
+        return toAdvisorResource(advisor, false);
+    }
+
+    public AdvisorResource toAdvisorResource(Advisor advisor, boolean validated) {
+        return new AdvisorResource(advisor.getId(), advisor.getUser().getId(), advisor.getRating(), validated);
     }
 
     public AdvisorCatalogResource toAdvisorCatalogResource(Advisor advisor, Profile profile) {
+        return toAdvisorCatalogResource(advisor, profile, false);
+    }
+
+    public AdvisorCatalogResource toAdvisorCatalogResource(Advisor advisor, Profile profile, boolean validated) {
         return new AdvisorCatalogResource(
                 advisor.getId(),
                 advisor.getUser().getId(),
                 advisor.getRating(),
-                toAdvisorProfileSummaryResource(profile)
+                toAdvisorProfileSummaryResource(profile),
+                validated
         );
     }
 
     public AdvisorCatalogResource toAdvisorCatalogResource(AdvisorRecommendationProjection projection) {
+        return toAdvisorCatalogResource(projection, false);
+    }
+
+    public AdvisorCatalogResource toAdvisorCatalogResource(AdvisorRecommendationProjection projection, boolean validated) {
         return new AdvisorCatalogResource(
                 projection.getAdvisorId(),
                 projection.getUserId(),
@@ -72,7 +85,8 @@ public class ProfileMapper {
                         projection.getOccupation(),
                         defaultSpokenLanguages(projection.getSpokenLanguages()),
                         projection.getExperience()
-                )
+                ),
+                validated
         );
     }
 

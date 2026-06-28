@@ -44,6 +44,7 @@ public class EducationalResourceMapper {
         entity.setSummary(resource.summary());
         entity.setType(resource.type());
         entity.setSourceName(resource.sourceName());
+        entity.setSourceUrl(resource.sourceUrl());
         entity.setDownloadUrl(resource.downloadUrl());
         entity.setThumbnailUrl(resource.thumbnailUrl());
         entity.setPublishedAt(resource.publishedAt());
