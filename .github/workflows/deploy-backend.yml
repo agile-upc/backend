@@ -1,0 +1,79 @@
+name: Deploy Backend
+
+on:
+  push:
+    branches: [ main ]
+
+env:
+  PROJECT_ID: agrotech-495901
+  REGION: us-central1
+  ZONE: us-central1-a
+  VM_NAME: agrotech-vm
+  REPO_NAME: agile
+  IMAGE_NAME: backend
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Test backend
+        run: mvn test
+
+      - name: Package backend
+        run: mvn clean package -DskipTests
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker
+        run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
+
+      - name: Build image
+        run: |
+          docker build \
+            -t ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/${{ env.IMAGE_NAME }}:${{ github.sha }} \
+            -t ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/${{ env.IMAGE_NAME }}:latest \
+            .
+
+      - name: Push image
+        run: |
+          docker push ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          docker push ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/${{ env.IMAGE_NAME }}:latest
+
+      - name: Deploy to VM
+        uses: google-github-actions/ssh-compute@v1
+        with:
+          instance_name: ${{ env.VM_NAME }}
+          zone: ${{ env.ZONE }}
+          ssh_private_key: ${{ secrets.GCE_SSH_PRIVATE_KEY }}
+          command: |
+            sudo gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
+            sudo docker pull ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/${{ env.IMAGE_NAME }}:latest
+            sudo docker stop agrotech-backend || true
+            sudo docker rm agrotech-backend || true
+            sudo docker run -d \
+              --name agrotech-backend \
+              --restart unless-stopped \
+              --add-host=host.docker.internal:host-gateway \
+              --env-file /opt/agrotech/backend.env \
+              -p 8080:8080 \
+              ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/${{ env.IMAGE_NAME }}:latest
