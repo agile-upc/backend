@@ -66,7 +66,7 @@ jobs:
           zone: ${{ env.ZONE }}
           ssh_private_key: ${{ secrets.GCE_SSH_PRIVATE_KEY }}
           command: |
-            sudo gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
+            gcloud auth print-access-token | sudo docker login -u oauth2accesstoken --password-stdin https://${{ env.REGION }}-docker.pkg.dev
             sudo docker pull ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/${{ env.IMAGE_NAME }}:latest
             sudo docker stop agrotech-backend || true
             sudo docker rm agrotech-backend || true
