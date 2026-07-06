@@ -45,7 +45,7 @@ GCS_BUCKET_NAME=your_gcs_bucket_name
 GCS_PROJECT_ID=your_gcs_project_id
 VERTEX_AI_PROJECT_ID=your_vertex_project_id
 VERTEX_AI_LOCATION=global
-VERTEX_AI_MODEL_ID=gemini-2.5-flash-preview-09-2025
+VERTEX_AI_MODEL_ID=gemini-2.5-flash
 ```
 
 ## Local development

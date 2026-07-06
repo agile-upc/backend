@@ -59,7 +59,7 @@ public class AIService {
     private static final Pattern ADVISOR_ID_PATTERN = Pattern.compile("(?im)^\\s*advisorId\\s*[:\\-]?\\s*(\\d+)\\s*$");
     private static final Pattern TOKEN_SPLITTER = Pattern.compile("[^\\p{L}\\p{N}]+");
     private static final String DEFAULT_VERTEX_LOCATION = "global";
-    private static final String DEFAULT_MODEL_ID = "gemini-2.5-flash-preview-09-2025";
+    private static final String DEFAULT_MODEL_ID = "gemini-2.5-flash";
     private static final String CLOUD_PLATFORM_SCOPE = "https://www.googleapis.com/auth/cloud-platform";
     private static final String INVALID_REQUEST_MESSAGE = "Necesito un poco mas de contexto para recomendarte un asesor. Indicame el tema, el problema que tienes y, si aplica, tu ubicacion.";
     private static final String INVALID_ADVISOR_MESSAGE = "Pude orientarte de forma general, pero no pude identificar un asesor valido. Intenta dar mas detalles para recomendarte uno correctamente.";
